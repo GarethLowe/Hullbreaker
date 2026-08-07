@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>HULLBREAK</title>
+<!--
+  This import map lets the source folder be served statically and played with no
+  build step at all. Under Vite it is inert (Vite resolves the same bare
+  specifier from node_modules) and `vite build` strips it from the output.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+<style>
+  :root {
+    --ink: #cfe0ec;
+    --dim: #7b93a6;
+    --line: rgba(120, 180, 215, 0.22);
+    --panel: rgba(8, 15, 22, 0.62);
+    --ok: #5fd39a;
+    --warn: #ffc65c;
+    --crit: #ff8a4a;
+    --dead: #ff5a5a;
+    --accent: #7fd8ff;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --diag-w: 330px;
+  }
+  @media (max-width: 900px) { :root { --diag-w: 250px; } }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #04070b;
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #view { display: block; width: 100vw; height: 100vh; }
+
+  #hudCanvas, #ui {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+  }
+  #hudCanvas { z-index: 5; }
+  #ui { z-index: 6; }
+
+  .panel {
+    position: absolute;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    backdrop-filter: blur(3px);
+    padding: 8px 10px;
+  }
+
+  .label {
+    color: var(--dim);
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  /* ---- left: speed + throttle ---- */
+  /* The damage-control panel runs the full height of the left edge and is up by
+     default. Both are absolutely positioned siblings with no z-index, so the
+     instruments used to paint straight over the module names. Park them just
+     clear of the panel while it is shown, and narrow the PANEL on small
+     displays rather than trying to find somewhere else to put the instruments —
+     there is nowhere else; the panel is full height by design. */
+  #ui:has(#diagPanel:not(.hidden)) #hudLeft { left: calc(var(--diag-w) + 34px); }
+  /* The target panel takes the right column, so the ship gauges move inboard. */
+  #ui:has(#tdiagPanel:not(.hidden)) #hudRight { right: calc(var(--diag-w) + 34px); }
+  #ui:has(#tdiagPanel:not(.hidden)) #hudTarget { right: calc(var(--diag-w) + 34px); }
+  #ui:has(#tdiagPanel:not(.hidden)) #hudRadar { right: calc(var(--diag-w) + 34px); }
+  #hudLeft {
+    left: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+    padding: 10px 12px;
+  }
+  #hudThrottleTrack {
+    width: 12px;
+    height: 132px;
+    border: 1px solid var(--line);
+    position: relative;
+    align-self: center;
+  }
+  #hudThrottleFill {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 0%;
+    background: linear-gradient(to top, #2b7fa8, var(--accent));
+  }
+  #hudSpeedWrap { display: flex; flex-direction: column; justify-content: center; }
+  #hudSpeed { font-size: 30px; font-weight: 600; line-height: 1; }
+  #hudThrottleTxt { color: var(--dim); font-size: 11px; margin-top: 3px; }
+  #hudAssist { font-size: 10px; font-weight: 700; margin-top: 6px; letter-spacing: 0.1em; }
+
+  /* ---- right: ship state ---- */
+  #hudRight { right: 18px; top: 50%; transform: translateY(-50%); width: 190px; }
+  .gauge { margin-bottom: 6px; }
+  .gauge:last-child { margin-bottom: 0; }
+  .gauge .bar {
+    height: 7px;
+    border: 1px solid var(--line);
+    margin-top: 2px;
+    position: relative;
+    overflow: hidden;
+  }
+  .gauge .bar i { position: absolute; inset: 0 auto 0 0; width: 0%; display: block; }
+  #hudShieldFill { background: linear-gradient(90deg, #2f6f9c, #7fd8ff); }
+  #hudHullFill   { background: linear-gradient(90deg, #6d7d88, #d3e2ec); }
+  #hudPowerFill  { background: linear-gradient(90deg, #3f8f5f, var(--ok)); }
+  #hudCapFill    { background: linear-gradient(90deg, #8a6bd0, #c3a6ff); }
+  #hudFuelFill   { background: linear-gradient(90deg, #8a7a3f, #e4cf7a); }
+  #hudHeatFill   { background: var(--warn); }
+
+  /* ---- bottom left: ship line + ammo ---- */
+  #hudBottom { left: 18px; bottom: 18px; min-width: 330px; }
+  #hudStats { font-size: 11px; letter-spacing: 0.04em; }
+  #hudStats b { color: #fff; font-weight: 600; }
+  #hudStats .bad { color: var(--dead); font-weight: 700; }
+  #hudWeapons {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+  }
+  #hudWeapons .slot { display: flex; gap: 6px; align-items: baseline; }
+  #hudWeapons .btn {
+    color: var(--dim);
+    font-size: 9px;
+    border: 1px solid var(--line);
+    padding: 0 4px;
+  }
+  #hudWeapons .slot.cold { opacity: 0.45; }
+  #hudAmmo {
+    margin-top: 5px;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    color: var(--dim);
+  }
+  #hudAmmo b { font-weight: 700; margin-right: 6px; }
+  #hudAmmo .rounds { color: var(--dim); margin-left: 8px; }
+
+  /* ---- bottom right: radar ---- */
+  #hudRadar { right: 18px; bottom: 18px; padding: 6px; }
+  #radar { display: block; width: 250px; height: 170px; }
+
+  /* ---- top right: target ---- */
+  #hudTarget { right: 18px; top: 18px; width: 260px; display: none; }
+  #hudTargetName { font-size: 13px; font-weight: 600; letter-spacing: 0.03em; }
+  #hudTargetSub { color: var(--dim); font-size: 10px; margin: 2px 0 7px; }
+  .tbar {
+    height: 13px;
+    border: 1px solid var(--line);
+    position: relative;
+    margin-bottom: 3px;
+    overflow: hidden;
+  }
+  .tbar i { position: absolute; inset: 0 auto 0 0; display: block; background: #4a5f6d; }
+  .tbar.sh i { background: linear-gradient(90deg, #2f6f9c, #7fd8ff); }
+  .tbar.hl i { background: linear-gradient(90deg, #6d7d88, #d3e2ec); }
+  .tbar em {
+    position: absolute;
+    inset: 0;
+    font-style: normal;
+    font-size: 9px;
+    line-height: 11px;
+    padding-left: 5px;
+    letter-spacing: 0.1em;
+    text-shadow: 0 0 3px #000, 0 0 6px #000;
+  }
+  .tsmall { color: var(--dim); font-size: 9px; letter-spacing: 0.08em; margin-top: 4px; }
+
+  /* ---- messages ---- */
+  #hudMessages {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 16%;
+    text-align: center;
+    width: 460px;
+  }
+  .msg {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    color: var(--warn);
+    text-shadow: 0 0 6px #000;
+    margin-bottom: 3px;
+  }
+  .msg.live { color: var(--crit); font-weight: 700; }
+
+  /* ---- damage-control panels (own ship left, target right) ---- */
+  .dcpanel {
+    position: absolute;
+    left: 18px;
+    top: 18px;
+    width: var(--diag-w);
+    max-height: calc(100vh - 250px);
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    backdrop-filter: blur(3px);
+  }
+  .dcpanel.target { left: auto; right: 18px; border-color: rgba(255, 200, 110, 0.30); }
+  .dcpanel.target .dc-head { border-bottom-color: rgba(255, 200, 110, 0.30); }
+  .dcpanel.target #tdiagTitle { color: #ffd88a; }
+  .dcpanel.hidden { display: none; }
+  .dc-head { padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  .dc-head > div:first-child { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; }
+  .dc-head > div:last-child {
+    color: var(--dim); font-size: 9px; margin-top: 2px; letter-spacing: 0.06em;
+  }
+  .dc-cutaway {
+    display: block;
+    width: 100%;
+    height: 190px;
+    border-bottom: 1px solid var(--line);
+  }
+  .dc-tree { overflow-y: auto; padding: 4px 0; flex: 1 1 auto; min-height: 90px; }
+  .dc-tree::-webkit-scrollbar { width: 5px; }
+  .dc-tree::-webkit-scrollbar-thumb { background: var(--line); }
+  .diag-group {
+    color: var(--dim);
+    font-size: 8px;
+    letter-spacing: 0.2em;
+    padding: 6px 10px 2px;
+  }
+  .diag-row {
+    display: grid;
+    grid-template-columns: 1fr 44px 62px;
+    gap: 6px;
+    align-items: center;
+    padding: 1px 10px;
+    font-size: 10px;
+    color: var(--ink);
+  }
+  .diag-row.selected { background: rgba(255, 200, 110, 0.14); }
+  .diag-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .diag-bar { height: 4px; background: rgba(255, 255, 255, 0.09); position: relative; }
+  .diag-bar i { position: absolute; inset: 0 auto 0 0; display: block; background: currentColor; }
+  .diag-val { text-align: right; color: var(--dim); font-size: 9px; }
+  .diag-row.ok   { color: var(--ok); }
+  .diag-row.warn { color: var(--warn); }
+  .diag-row.crit { color: var(--crit); }
+  .diag-row.dead { color: var(--dead); opacity: 0.75; }
+  .diag-row.ok .diag-name, .diag-row.warn .diag-name,
+  .diag-row.crit .diag-name, .diag-row.dead .diag-name { color: var(--ink); }
+
+  .dc-crew {
+    border-top: 1px solid var(--line);
+    padding: 4px 10px 6px;
+    font-size: 9px;
+    flex: 0 0 auto;
+    max-height: 130px;
+    overflow-y: auto;
+  }
+  .crew-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: 8px;
+    padding: 1px 0;
+    color: var(--ok);
+  }
+  .crew-row.warn { color: var(--warn); }
+  .crew-row.crit { color: var(--crit); }
+  .crew-row.dead { color: var(--dead); opacity: 0.6; text-decoration: line-through; }
+  .crew-count { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .crew-where { color: var(--dim); }
+  .crew-state { color: var(--dim); min-width: 54px; text-align: right; }
+  .crew-foot {
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px solid var(--line);
+    color: var(--dim);
+    letter-spacing: 0.08em;
+  }
+
+  /* ---- overlays ---- */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(3, 6, 10, 0.86);
+    backdrop-filter: blur(5px);
+    /* The click that dismisses these is handled on the window, so nothing here
+       needs to be interactive — and dragging across the key list should not
+       select text when the user is trying to start the game. */
+    user-select: none;
+    cursor: pointer;
+  }
+  #gameover { cursor: default; }
+  .overlay.hidden { display: none; }
+  .card { max-width: 780px; padding: 34px 40px; }
+  .card h1 {
+    font-size: 40px;
+    letter-spacing: 0.34em;
+    margin: 0 0 4px;
+    font-weight: 700;
+  }
+  .card h2 {
+    font-size: 11px;
+    letter-spacing: 0.26em;
+    color: var(--accent);
+    margin: 0 0 20px;
+    font-weight: 500;
+  }
+  .card p { color: var(--dim); line-height: 1.65; margin: 0 0 16px; max-width: 620px; }
+  .card p b { color: var(--ink); font-weight: 600; }
+  .keys {
+    display: grid;
+    grid-template-columns: repeat(2, auto 1fr);
+    gap: 3px 12px;
+    font-size: 11px;
+    margin-bottom: 20px;
+  }
+  .keys kbd {
+    background: rgba(120, 180, 215, 0.13);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    padding: 1px 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    white-space: nowrap;
+  }
+  .keys span { color: var(--dim); }
+  .start {
+    color: var(--accent);
+    letter-spacing: 0.18em;
+    font-size: 12px;
+    animation: pulse 2.1s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<canvas id="hudCanvas"></canvas>
+
+<div id="ui">
+  <div id="diagPanel" class="dcpanel hidden">
+    <div class="dc-head">
+      <div id="diagTitle">—</div>
+      <div id="diagSub">—</div>
+    </div>
+    <canvas id="diagCutaway" class="dc-cutaway" width="330" height="190"></canvas>
+    <div id="diagTree" class="dc-tree"></div>
+    <div id="diagCrew" class="dc-crew"></div>
+  </div>
+
+  <div id="tdiagPanel" class="dcpanel target hidden">
+    <div class="dc-head">
+      <div id="tdiagTitle">—</div>
+      <div id="tdiagSub">—</div>
+    </div>
+    <canvas id="tdiagCutaway" class="dc-cutaway" width="330" height="190"></canvas>
+    <div id="tdiagTree" class="dc-tree"></div>
+    <div id="tdiagCrew" class="dc-crew"></div>
+  </div>
+
+  <div id="hudLeft" class="panel">
+    <div id="hudThrottleTrack"><i id="hudThrottleFill"></i></div>
+    <div id="hudSpeedWrap">
+      <div class="label">m/s</div>
+      <div id="hudSpeed">0</div>
+      <div id="hudThrottleTxt">0%</div>
+      <div id="hudAssist">FA ON</div>
+    </div>
+  </div>
+
+  <div id="hudRight" class="panel">
+    <div class="gauge"><div class="label">Shield</div><div class="bar"><i id="hudShieldFill"></i></div></div>
+    <div class="gauge"><div class="label">Hull</div><div class="bar"><i id="hudHullFill"></i></div></div>
+    <div class="gauge"><div class="label">Power</div><div class="bar"><i id="hudPowerFill"></i></div></div>
+    <div class="gauge"><div class="label">Capacitor</div><div class="bar"><i id="hudCapFill"></i></div></div>
+    <div class="gauge"><div class="label">Fuel</div><div class="bar"><i id="hudFuelFill"></i></div></div>
+    <div class="gauge"><div class="label">Coolant temp</div><div class="bar"><i id="hudHeatFill"></i></div></div>
+  </div>
+
+  <div id="hudBottom" class="panel">
+    <div id="hudStats"></div>
+    <div id="hudWeapons"></div>
+    <div id="hudAmmo"></div>
+  </div>
+
+  <div id="hudRadar" class="panel"><canvas id="radar" width="250" height="170"></canvas></div>
+
+  <div id="hudTarget" class="panel">
+    <div id="hudTargetName">—</div>
+    <div id="hudTargetSub">—</div>
+    <div id="hudTargetBars"></div>
+  </div>
+
+  <div id="hudMessages"></div>
+</div>
+
+<div id="splash" class="overlay">
+  <div class="card">
+    <h1>HULLBREAK</h1>
+    <h2>HEAVY CRUISER · MERIDIAN ACTUAL</h2>
+    <p>
+      Your ship is not a health bar. It is fourteen pressurised compartments
+      holding seventy-odd components, wired together by three networks —
+      <b>power</b>, <b>data</b> and <b>coolant</b> — and crewed by
+      <b>four hundred and twenty</b> hands in eight divisions who have to walk to
+      a problem before they can fix it. Hold <b>W</b> to build speed; let go and
+      the ship brakes itself back to a stop.
+    </p>
+    <p>
+      So does everything you are shooting at — and you can read its interior in
+      the same detail as your own, in the panel on the right. You do not have to
+      destroy a turret: cutting the conduit that feeds it, boiling the loop that
+      cools it, or killing the gunnery division that lays it will all do. These
+      are capital ships fighting at four to eight kilometres, so an engagement
+      runs for minutes. Watch what your shooting actually breaks.
+    </p>
+    <div class="keys">
+      <kbd>Mouse</kbd><span>Aim — pitch &amp; yaw</span>
+      <kbd>W</kbd><span>Hold to build speed</span>
+      <kbd>S</kbd><span>Hold to reverse</span>
+      <kbd>A D</kbd><span>Yaw left / right</span>
+      <kbd>Q E</kbd><span>Roll left / right</span>
+      <kbd>R F</kbd><span>Translate up / down</span>
+      <kbd>Z C</kbd><span>Translate left / right</span>
+      <kbd>Space</kbd><span>Boost</span>
+      <kbd>X</kbd><span>Flight assist</span>
+      <kbd>LMB</kbd><span>Fire primary weapon</span>
+      <kbd>RMB</kbd><span>Fire secondary weapon</span>
+      <kbd>Wheel</kbd><span>Select primary</span>
+      <kbd>Shift+Wheel</kbd><span>Select secondary</span>
+      <kbd>1 2 3</kbd><span>Load AP / HE / delay-fused</span>
+      <kbd>T</kbd><span>Lock what is ahead</span>
+      <kbd>Y</kbd><span>Cycle contacts</span>
+      <kbd>[ ]</kbd><span>Cycle subsystem</span>
+      <kbd>U</kbd><span>Target weakest subsystem</span>
+      <kbd>H</kbd><span>Damage control panels</span>
+      <kbd>, .</kbd><span>Scroll your module tree</span>
+      <kbd>J</kbd><span>Swap the two panels</span>
+      <kbd>; '</kbd><span>Scroll the target's tree</span>
+      <kbd>B</kbd><span>Vent burning compartment</span>
+      <kbd>V</kbd><span>Cockpit / chase view</span>
+      <kbd>N</kbd><span>Time dilation</span>
+      <kbd>G</kbd><span>Deploy a test contact</span>
+      <kbd>M</kbd><span>Mute</span>
+      <kbd>Esc</kbd><span>Pause</span>
+    </div>
+    <div class="start">CLICK TO FLY</div>
+  </div>
+</div>
+
+<div id="pause" class="overlay hidden">
+  <div class="card">
+    <h1>PAUSED</h1>
+    <h2>POINTER RELEASED</h2>
+    <div class="start">CLICK TO RESUME</div>
+  </div>
+</div>
+
+<div id="gameover" class="overlay hidden">
+  <div class="card">
+    <h1>LOST</h1>
+    <h2 id="gameoverStats">—</h2>
+    <p>Reload the page to fly again.</p>
+  </div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
