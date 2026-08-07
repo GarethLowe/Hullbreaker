@@ -213,8 +213,6 @@ export class Pilot {
     this.stateT = 0;
     if (s === AI_STATE.WITHDRAW) {
       this.withdrawT = 0;
-    /** Set once running has failed; from then on it fights where it stands. */
-    this.lastStand = false;
     }
     if (s === AI_STATE.BREAK) {
       // Pick a break direction once, so the manoeuvre is committed rather than
@@ -255,10 +253,22 @@ export class Pilot {
 
     const off = Math.hypot(_local.x, _local.y);
     if (rollToTarget && off > 0.18) {
-      // Roll the target overhead so the pitch axis — the strongest on every
-      // hull here — does the work of the turn. Only worth doing when the target
-      // is genuinely off-axis; rolling to correct small errors looks drunk.
-      cmd.roll = clamp(_local.x * 1.7 * clamp01((off - 0.18) * 2.5), -1, 1);
+      // Roll the target onto the DORSAL side — not merely onto the pitch axis.
+      //
+      // Two reasons now. The old one: the pitch axis is the strongest on every
+      // hull here, so putting the target overhead lets the best axis do the work
+      // of the turn. The new one: guns are bolted to a face and cannot depress
+      // more than a few degrees below it, so a target held under the keel is one
+      // no dorsal turret can bear on. This used to roll to whichever side came
+      // first and, for a target abeam, that was reliably the ventral one — the
+      // ship would turn to face a contact and mask its own broadside doing it.
+      //
+      // `theta` is the target's bearing around the roll axis, zero dead
+      // overhead. Driving it to zero is the same manoeuvre, aimed properly.
+      // Only worth doing when the target is genuinely off-axis; rolling to
+      // correct small errors looks drunk.
+      const theta = Math.atan2(_local.x, _local.y);
+      cmd.roll = clamp(-theta * 1.1 * clamp01((off - 0.18) * 2.5), -1, 1);
     } else {
       cmd.roll = damp(cmd.roll, 0, 5, dt);
     }

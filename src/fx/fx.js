@@ -98,10 +98,21 @@ export class FX {
     game.scene.add(this.lines);
 
     // --- flashes ------------------------------------------------------------
+    // These lights are created ONCE and stay visible for the life of the
+    // program, dark when idle.
+    //
+    // Toggling `visible` looks like the obvious way to pool a light and is a
+    // trap: three.js keys every shader program on the number of visible lights
+    // of each type, so switching one on changes `numPointLights` and forces a
+    // recompile of EVERY material in the scene. With ten flashes that is ten
+    // distinct light counts, each one re-linking the whole roster of programs
+    // the first time it is seen — a hitch on the first explosion, the first big
+    // explosion, the first time two go off at once, and so on. A point light of
+    // zero intensity contributes nothing to the image; a constant light count
+    // costs one shader compile for the entire session.
     this.flashes = [];
     for (let i = 0; i < MAX_FLASHES; i++) {
       const l = new THREE.PointLight(0xffffff, 0, 160, 2);
-      l.visible = false;
       game.scene.add(l);
       this.flashes.push({ light: l, life: 0, max: 1, peak: 0 });
     }
@@ -142,7 +153,6 @@ export class FX {
     f.light.position.copy(pos);
     f.light.color.set(color);
     f.light.distance = radius;
-    f.light.visible = true;
     f.peak = intensity;
     f.life = life;
     f.max = life;
@@ -388,7 +398,6 @@ export class FX {
       }
       f.life -= dt;
       if (f.life <= 0) {
-        f.light.visible = false;
         f.light.intensity = 0;
         continue;
       }
@@ -405,7 +414,7 @@ export class FX {
     }
     for (const f of this.flashes) {
       f.life = 0;
-      f.light.visible = false;
+      f.light.intensity = 0;
     }
   }
 }

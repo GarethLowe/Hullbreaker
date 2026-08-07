@@ -42,6 +42,8 @@ const _d = new THREE.Vector3();
 const _p = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _t = new THREE.Vector3();
+/** Scratch for the penetration trace; `_p` is already the live hit point. */
+const _xr = new THREE.Vector3();
 
 export class Ballistics {
   constructor(game) {
@@ -241,10 +243,15 @@ export class Ballistics {
           _p.copy(tgt.position);
         }
         _o.copy(_p).sub(m.pos);
-        _d.copy(tgt.velocity).sub(m.vel);
+        // Lead on the TARGET's motion. Using the closing velocity here — the
+        // seeker's own velocity subtracted from the target's — meant a torpedo
+        // steered by the negative of its own 500 m/s, which dragged the aim
+        // point back onto the launcher and put every shot into empty space.
+        // Against a stationary target dead ahead it missed by fifty metres and
+        // sailed on past, which is why the tubes measured as doing nothing.
         const speed = Math.max(m.vel.length(), 40);
         const lead = Math.min(_o.length() / speed, 4);
-        _o.addScaledVector(_d, lead).normalize();
+        _o.addScaledVector(tgt.velocity, lead).normalize();
         _d.copy(m.vel).normalize();
         // Turn rate limits how fast the nose can come round.
         const maxTurn = w.turnRate * dt;
@@ -257,6 +264,17 @@ export class Ballistics {
       } else {
         _d.copy(m.vel).normalize();
         m.vel.addScaledVector(_d, w.accel * 0.5 * dt);
+      }
+      // Burn-out. Without a ceiling the motor integrates for the whole 42
+      // second fuse — a weapon described as slow and obvious was passing
+      // 3.9 km/s at twenty seconds and could no longer turn inside anything.
+      // A seeker that outruns its own turn rate cannot hit; capping speed is
+      // what makes `turnRate` mean something.
+      if (w.topSpeed) {
+        const sp = m.vel.length();
+        if (sp > w.topSpeed) {
+          m.vel.multiplyScalar(w.topSpeed / sp);
+        }
       }
 
       _t.copy(m.vel).multiplyScalar(dt);
@@ -282,9 +300,16 @@ export class Ballistics {
           }
           s.gatherRayHits(m.prev, _d, len, hits);
         }
+        // Fuse on PLATING, not on the field. A shield bubble stands well off
+        // the hull — on a cruiser, 170 metres off the bow — so fusing on the
+        // boundary detonated every warhead at standoff range, where the inverse
+        // square law threw away four fifths of it before the facet even got a
+        // say. The torpedo flies through the bubble and functions against the
+        // ship; `explode` still hands the blast to the facet that faces it, so
+        // an intact shield is a real defence rather than a premature trigger.
         let best = null;
         for (const h of hits) {
-          if ((h.kind === 'wallIn' || h.kind === 'shield') && (!best || h.t < best.t)) {
+          if (h.kind === 'wallIn' && (!best || h.t < best.t)) {
             best = h;
           }
         }
@@ -362,6 +387,32 @@ export class Ballistics {
     let announced = false;
     let wallsCrossed = 0;
 
+    // --- penetration trace ---------------------------------------------------
+    // Recorded only for a hull a diagnostic panel is actually showing, which is
+    // at most two of them, so the common case — a repeater putting six rounds a
+    // second into something nobody is looking at — allocates nothing.
+    //
+    // One traced hull per walk. A single round crossing BOTH your ship and your
+    // target in one 16 ms step is possible in principle and has never happened
+    // in practice; it would simply not be drawn on the second hull.
+    let trace = null;
+    let traceShip = null;
+    const mark = (ship, kind, at, label, joules) => {
+      if (!traceShip) {
+        if (!this._tracing(ship)) {
+          return;
+        }
+        traceShip = ship;
+        trace = ship.beginXray();
+      } else if (ship !== traceShip) {
+        return;
+      }
+      const p = ship.worldToHull(at, _xr);
+      trace.nodes.push({
+        x: p.x, y: p.y, z: p.z, kind, label, e: joules || 0,
+      });
+    };
+
     for (let i = 0; i < hits.length; i++) {
       const h = hits[i];
       if (E <= 0) {
@@ -376,6 +427,7 @@ export class Ballistics {
         if (ctx.burst === 'surface') {
           ship.sys.damageShield(h.facet, E * 0.3, ctx.dwell);
           ship.shieldImpact(_p, 0.7);
+          mark(ship, 'shieldStop', _p, `${h.facet.toUpperCase()} FACET`, E);
           this._announce(ctx, ship, false, announced);
           return { stopped: true, energy: 0, point: _p.clone(), inside: false };
         }
@@ -393,6 +445,8 @@ export class Ballistics {
         game.fx.shieldHit(_p, _n, collapsed);
         ship.shieldImpact(_p, clamp01(1 - through / Math.max(E, 1)));
         game.audio.impact('shield', _p, clamp01(E / 1e6));
+        mark(ship, through <= 0 ? 'shieldStop' : 'shield',
+          _p, `${h.facet.toUpperCase()} FACET`, E - through);
         this._announce(ctx, ship, false, announced);
         announced = true;
         if (through <= 0) {
@@ -432,6 +486,8 @@ export class Ballistics {
           });
           game.fx.sparkBurst(_p, _n, 30, 0xffc070);
           game.fx.blastPlume(_p, _n, ship.velocity, markRadius(ctx.energy) * 0.9);
+          mark(ship, 'surface', _p,
+            ship.hull.sectionById[h.section].label, ctx.energy * 0.25);
           this._announce(ctx, ship, false, announced);
           return { stopped: true, energy: 0, point: _p.clone(), inside: false };
         }
@@ -451,6 +507,7 @@ export class Ballistics {
           });
           game.fx.sparkBurst(_p, _n, 26, 0xfff0c0);
           game.audio.impact('ricochet', _p, 1);
+          mark(ship, 'ricochet', _p, ship.hull.sectionById[h.section].label, E * 0.22);
           this._announce(ctx, ship, false, announced);
           return {
             stopped: false,
@@ -495,6 +552,8 @@ export class Ballistics {
             game.fx.spall(_p, dir, 16, 0xffb060);
           }
           game.audio.impact('metal', _p, 0.9);
+          mark(ship, perforated ? 'wall' : 'wallStop', _p,
+            ship.hull.sectionById[h.section].label, consumed);
           this._announce(ctx, ship, false, announced);
           announced = true;
 
@@ -517,8 +576,10 @@ export class Ballistics {
           });
           game.fx.spall(_p, dir, 24, 0xffc98a);
           game.audio.impact('metal', _p, 0.6);
+          mark(ship, 'exit', _p, ship.hull.sectionById[h.section].label, consumed);
         }
         if (E <= 0) {
+          mark(ship, 'stop', _p, ship.hull.sectionById[h.section].label, consumed);
           return { stopped: true, energy: 0, point: _p.clone(), inside: h.kind === 'wallOut' };
         }
         continue;
@@ -546,6 +607,14 @@ export class Ballistics {
         game.onModuleKill(ship, m, ctx.owner);
       }
       game.fx.internalHit(_p, dir, m.kind);
+      // The node that matters: what the round actually found in there, and
+      // whether it finished it. This is the whole reason for the trace.
+      mark(ship, E <= 0 ? 'moduleStop' : 'module', _p, m.label, consumed);
+      if (trace && traceShip === ship) {
+        const last = trace.nodes[trace.nodes.length - 1];
+        last.id = m.id;
+        last.killed = !before && m.destroyed;
+      }
       this._announce(ctx, ship, true, announced);
       announced = true;
       if (E <= 0) {
@@ -554,6 +623,13 @@ export class Ballistics {
     }
 
     return { stopped: false, energy: E, point: null };
+  }
+
+  /** Is anything on screen currently showing this hull's interior? */
+  _tracing(ship) {
+    const g = this.game;
+    return !!((g.diagnostics && g.diagnostics.ship === ship)
+      || (g.targetPanel && g.targetPanel.ship === ship));
   }
 
   _announce(ctx, ship, internal, already) {
@@ -598,8 +674,15 @@ export class Ballistics {
       } else {
         // Obliquity matters here too: a glancing beam smears its energy out.
         const bite = Math.max(first.cos !== undefined ? first.cos : 1, 0.25);
+        // Split the delivered energy between breaking things and heating them,
+        // rather than spending it twice. Injecting the full budget as heat ON
+        // TOP of 55% as structural damage made a lance worth 155% of its own
+        // output, and the surplus went somewhere invisible: into the shared
+        // coolant loop, which cooked a cruiser's reactor to detonation in
+        // twenty-two seconds from a bow hit. The cascade is the right mechanism
+        // — it just should not be free.
         target.sys.damageSection(first.section, joules * bite * 0.55, _p, dir);
-        target.sys.injectHeat(first.section, joules * bite);
+        target.sys.injectHeat(first.section, joules * bite * 0.45);
         target.scorch(first.section, 0.5 * dt);
         // A beam is continuous, so it cannot lay a mark per frame without
         // flushing the whole sheet in a second. It leaves one every 0.2 s

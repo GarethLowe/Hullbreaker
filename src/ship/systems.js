@@ -114,6 +114,29 @@ const DISSIPATION_PER_RADIATOR_FRAC = 0.266;
 /** Kinds whose electrical draw follows what they are actually doing. */
 const DUTY_KINDS = new Set(['thruster', 'rcs', 'hardpoint']);
 
+/**
+ * Thermal-mass references for `injectHeat`. Deposited energy raises a thing's
+ * temperature in inverse proportion to how much of it there is; these fix the
+ * scale, so a module or compartment of this size behaves exactly as the old
+ * unscaled constants did and everything larger heats more slowly.
+ *
+ * `maxHp` is the stand-in for a module's bulk — it already tracks how big and
+ * how substantial a fitting is across the roster, from a 1.5 MJ conduit to a
+ * 140 MJ main drive — and using it avoids adding a mass column to every row of
+ * the hull tables purely to feed one equation.
+ */
+const REF_BULK = 1.0e7;
+const REF_VOLUME = 900;
+
+/**
+ * Waste heat a projector takes per watt its facets dissipate. Chosen so full
+ * dissipation lands near the projectors' authored `heat` on every hull in the
+ * roster (SABRE 8.3e-5, MERIDIAN 5.5e-5, BASTION 4.3e-5 to hit design duty
+ * exactly), which keeps "shields are bought from the radiators" a real cost
+ * without making a working shield self-destructive.
+ */
+const SHED_HEAT_PER_WATT = 5.0e-5;
+
 export class Systems {
   constructor(hull, ship = null) {
     this.hull = hull;
@@ -453,7 +476,21 @@ export class Systems {
    */
   damageShield(facet, joules, dwell) {
     const f = this.shield.facets[facet];
-    if (!f || f.down || f.charge <= 0 || f.coupling <= 0) {
+    if (!f || f.down) {
+      return joules;
+    }
+    // Exhausted, and it has to SAY so. A facet whose charge is being drained
+    // as fast as the reactor can put it back sits pinned just above zero: it
+    // was passing every joule straight through while the rose still drew it as
+    // a live facet, because the collapse latch only fired if a tick happened to
+    // land on exactly zero. Under a slow drain that tick never comes. The whole
+    // point of having two named failure modes is that the player can see which
+    // one they are in.
+    if (f.charge <= f.max * 1e-3 || f.coupling <= 0) {
+      f.down = true;
+      f.downT = 3.0;
+      f.cause = 'COLLAPSED';
+      this.events.push({ type: 'facetDown', facet, cause: 'COLLAPSED' });
       return joules;
     }
     const power = joules / Math.max(dwell, 1e-5);
@@ -487,14 +524,24 @@ export class Systems {
   ionPulse(joules) {
     this.brownout = Math.max(this.brownout, 3.2);
     this.capStore = Math.max(0, this.capStore - joules * 2e-6);
-    let hit = 0;
+    // The induced energy is SHARED between the runs it couples into, not
+    // delivered to each of them in full. Giving every conduit the same bite
+    // meant one 60 MJ pulse dealt 144 MJ to a dreadnought's twenty runs and
+    // only 58 MJ to a picket's eight — so the weapon got stronger the more
+    // redundant its target was, which stands the entire point of wiring a ship
+    // as a ring exactly on its head. Split the budget and redundancy protects
+    // you again: more parallel paths, less energy into any one of them.
+    const live = [];
     for (const c of this.conduits) {
-      if (c.destroyed || c.def.critical || c.def.net === 'coolant') {
-        continue;
+      if (!c.destroyed && !c.def.critical && c.def.net !== 'coolant') {
+        live.push(c);
       }
-      this.damageModule(c.id, joules * 0.12, null, null);
-      hit++;
     }
+    const each = live.length > 0 ? (joules * 0.6) / live.length : 0;
+    for (const c of live) {
+      this.damageModule(c.id, each, null, null);
+    }
+    const hit = live.length;
     // A shield is a field, and an induced field is exactly what an ion pulse
     // wrecks. It does not deposit heat to be dissipated — it drives the
     // emitters out of phase, so the charge goes and the coupling goes with it.
@@ -516,13 +563,21 @@ export class Systems {
   injectHeat(sectionId, joules) {
     const s = this.sections.get(sectionId);
     if (s) {
-      s.temp = Math.min(900, s.temp + joules * 4e-5);
+      // Per unit of compartment, not per compartment. A dreadnought's drive
+      // cluster is a hundred times the volume of a picket's avionics bay and
+      // should not come to the same temperature off the same joule.
+      s.temp = Math.min(900, s.temp + (joules * 4e-5) * (REF_VOLUME / Math.max(s.volume, 1)));
     }
     for (const m of this.modules.values()) {
       if (m.section !== sectionId || m.destroyed) {
         continue;
       }
-      m.temp = Math.min(900, m.temp + joules * 3e-5);
+      // Same argument for the kit inside. Without a thermal mass here, a 12 MW
+      // lance raised a BASTION main drive 324 degrees per second and tripped
+      // both of them — through a full-strength shield, at 89% hull, with a
+      // 1400 MW power surplus — inside a second. That one unscaled term was
+      // most of why the heaviest hull in the game lost to the lightest.
+      m.temp = Math.min(900, m.temp + (joules * 3e-5) * (REF_BULK / Math.max(m.maxHp, 1)));
       const node = m.def.needs && m.def.needs.coolant;
       const loop = node && this.loops.get(node);
       if (loop) {
@@ -1159,8 +1214,17 @@ export class Systems {
 
     // The heat the emitters shed has to go somewhere: into the projectors, and
     // from there into their coolant loop like any other module's waste heat.
+    //
+    // Scaled so that a facet array shedding at FULL capacity runs its
+    // projectors at roughly their design duty — the same principle as the heat
+    // exchangers, where a hot reading means damage rather than "this is a big
+    // ship". At the old 1.0e-3 a working shield fed its own projectors about
+    // eighteen times their rated heat and tripped them within twenty seconds of
+    // taking any fire at all, which turned the shield into a liability the
+    // moment it did its job. That never showed up before because most shots
+    // bypassed the bubble entirely, so the facets never carried load to shed.
     if (shedTotal > 0 && projectors.length > 0) {
-      const each = (shedTotal / dt) * 1.0e-3 / projectors.length;
+      const each = (shedTotal / dt) * SHED_HEAT_PER_WATT / projectors.length;
       for (const m of projectors) {
         m.heatAcc += each;
       }
@@ -1432,19 +1496,40 @@ export class Systems {
   }
 
   /**
-   * A ship is finished when it cannot fight, move or think. Checked by the
-   * director rather than by a single hit-point pool, so kills are always the
-   * result of a specific failure you can point at in the schematic.
+   * A ship is DESTROYED when something aboard has actually finished it. Checked
+   * by the director rather than by a single hit-point pool, so a kill is always
+   * the result of a specific failure you can point at in the schematic.
+   *
+   * This used to read `!(hasPower && (canMove || canThink))`, and measurement
+   * showed every kill in the game — 21 of 21 sampled — came out of that one
+   * clause. `hasPower` is `supply > 0.4` MW, which a cruiser exceeds at idle by
+   * three orders of magnitude, and the 0.10 hull floor was never reached, so
+   * the whole test collapsed to "no drives AND no computer". Ships died at 36
+   * to 62 percent hull with full magazines and working guns, and none of the
+   * four bars on the HUD predicted it. Losing the ability to manoeuvre is now
+   * `isDerelict` — a different outcome, handled differently.
    */
   isStricken() {
-    const dead = this.modules.get('reactor');
-    if (dead && dead.detonated) {
+    const core = this.modules.get('reactor');
+    if (core && core.detonated) {
       return true;
     }
-    const hasPower = this.supply > 0.4;
-    const canMove = this.driveAuthority() > 0.06;
-    const canThink = this.flightComputer;
-    return !(hasPower && (canMove || canThink)) || this.hullFraction() < 0.10;
+    // The hull has come apart, or there is nobody left to fight it.
+    return this.hullFraction() < 0.18
+      || this.integrity < 0.12
+      || (this.ship && this.ship.crew.complement < 0.06)
+      // Cold and dark: no plant, no capacitor, nothing to shoot with.
+      || (this.supply <= 0.4 && this.capStore <= this.capMax * 0.02);
+  }
+
+  /**
+   * Mission-killed: adrift and unable to fly itself. Not the same event as
+   * being destroyed — the guns may still bear and the crew are still aboard —
+   * so the director treats it as a hulk rather than a wreck, and the player
+   * gets the choice of finishing it or leaving it behind.
+   */
+  isDerelict() {
+    return this.driveAuthority() <= 0.06 && !this.flightComputer;
   }
 
   drainEvents() {

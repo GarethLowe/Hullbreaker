@@ -12,6 +12,16 @@ import { Systems, ATMO_CRITICAL } from '../src/ship/systems.js';
 import { Crew } from '../src/ship/crew.js';
 import { Body, Autopilot } from '../src/ship/flight.js';
 import { WEAPONS, AMMO } from '../src/weapons/defs.js';
+import { Ship, MOUNT_DEPRESSION } from '../src/ship/ship.js';
+import { Pilot } from '../src/ship/ai.js';
+import { Euler, Quaternion, Vector3, Color } from 'three';
+import { PARTS, MUZZLES, PIVOTS } from '../src/world/kit.js';
+import {
+  mountFrame, partGeometry, shellGeometry, skinFraction, SHELL_STYLES,
+} from '../src/world/hardware.js';
+import {
+  skyColour, MOODS, Space, CAMERA_NEAR, CAMERA_FAR, STAR_SHELL, SKY_SHELL,
+} from '../src/world/space.js';
 
 let passed = 0;
 const failures = [];
@@ -48,6 +58,28 @@ for (const [id, h] of Object.entries(HULLS)) {
   ok(`${id}: roll is the easiest axis`, h.inertia[2] < h.inertia[0]);
   ok(`${id}: every crew post exists`, h.crew.every((c) => h.sectionById[c.post]));
   ok(`${id}: crew numbers in the dozens or hundreds`, h.crewTotal >= 80);
+  // The field has to enclose the ship. When it did not, every hull's bow,
+  // stern and drive bay stood outside its own bubble, so axial fire bypassed
+  // the shield entirely and the drives — which are most of what decides a kill
+  // — were never protected at all.
+  {
+    const r = h.shield.radii;
+    let worst = 0;
+    let worstId = '';
+    for (const s of h.sections) {
+      let q = 0;
+      for (let k = 0; k < 3; k++) {
+        const e = (Math.abs(s.pos[k] - h.com[k]) + s.half[k]) / r[k];
+        q += e * e;
+      }
+      if (Math.sqrt(q) > worst) {
+        worst = Math.sqrt(q);
+        worstId = s.id;
+      }
+    }
+    ok(`${id}: every compartment sits inside the shield ellipsoid`, worst <= 1,
+      `"${worstId}" is at ${worst.toFixed(2)}x the field radius`);
+  }
   ok(`${id}: control authority is derived, not authored`,
     h.flight.torque.every((t) => t > 0) && h.flight.mainThrust > 0);
   // The whole point of the rescale: a target crossing at engagement range
@@ -137,6 +169,133 @@ for (const [id, h] of Object.entries(HULLS)) {
   }
   ok('load shedding is strictly by priority', highestShed <= lowestKept,
     `shed up to ${highestShed}, kept from ${lowestKept}`);
+}
+
+// --- the painted sky ----------------------------------------------------------
+// The bake is a loop of ramps and lobes whose two real failure modes are both
+// invisible in code review: "too bright", which stops ships silhouetting, and
+// "steps hard enough to contour", which is the defining artefact of the whole
+// technique. Both are pure maths, so they check headless.
+{
+  const dirs = [];
+  for (let i = 0; i < 4000; i++) {
+    const z = (i / 3999) * 2 - 1;
+    const a = i * 2.39996;
+    const r = Math.sqrt(Math.max(0, 1 - z * z));
+    dirs.push(new Vector3(r * Math.cos(a), z, r * Math.sin(a)));
+  }
+  const c0 = new Color();
+  for (const [id, mood] of Object.entries(MOODS)) {
+    let peak = 0;
+    for (const d of dirs) {
+      skyColour(d, mood, c0);
+      peak = Math.max(peak, 0.2126 * c0.r + 0.7152 * c0.g + 0.0722 * c0.b);
+    }
+    // Relic's ceiling: the brightest sky sits near mid-grey. 0.28 linear is
+    // about #8f8f8f on screen.
+    ok(`sky "${id}" stays darker than a warship`, peak < 0.28,
+      `peak luminance ${peak.toFixed(3)} linear`);
+  }
+
+  // Walk great circles and measure the 8-bit sRGB step per degree. More than a
+  // level or three per degree and the gradient contours visibly.
+  //
+  // MANY circles, and every mood. This walked exactly one circle through one
+  // mood, which is a coin flip rather than a test: the steepest thing on the
+  // sphere is wherever the band's warped centre line happens to run, and a
+  // single fixed circle can miss it entirely. It did — the check passed at 3
+  // while a 40-circle sweep found 4 on the same palette.
+  const c1 = new Color();
+  const to8 = (v) => Math.round(255 * (v <= 0.0031308
+    ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055));
+  const ax = new Vector3();
+  const up = new Vector3();
+  const probe = new Vector3();
+  const at = (deg) => {
+    const t = (deg * Math.PI) / 180;
+    return probe.copy(ax).multiplyScalar(Math.cos(t))
+      .addScaledVector(up, Math.sin(t)).normalize();
+  };
+  for (const [id, mood] of Object.entries(MOODS)) {
+    let maxStep = 0;
+    for (let k = 0; k < 40; k++) {
+      // Golden-angle spun basis, so the 40 circles are spread over the sphere
+      // rather than sharing an axis.
+      const az = k * 2.39996;
+      ax.set(Math.cos(az), Math.sin(az) * 0.6, Math.sin(az) * 0.8).normalize();
+      up.set(-Math.sin(az), Math.cos(az) * 0.3, Math.sin(az * 1.7))
+        .cross(ax).normalize();
+      for (let a = 0; a < 360; a++) {
+        skyColour(at(a), mood, c0);
+        skyColour(at(a + 1), mood, c1);
+        maxStep = Math.max(maxStep,
+          Math.abs(to8(c0.r) - to8(c1.r)),
+          Math.abs(to8(c0.g) - to8(c1.g)),
+          Math.abs(to8(c0.b) - to8(c1.b)));
+      }
+    }
+    ok(`sky "${id}" gradient does not contour`, maxStep <= 3,
+      `${maxStep} sRGB levels per degree`);
+  }
+}
+
+// --- the backdrop ladder ------------------------------------------------------
+// near < engagement < stars < sky < far. Every one of these failing is a silent
+// visual break with no error attached: stars punching through a distant ship,
+// or the whole sky clipped away by the far plane and the game rendering on
+// black. Nothing else in the codebase states the relationship, so it lives here.
+{
+  ok('near plane is in front of everything', CAMERA_NEAR > 0
+    && CAMERA_NEAR < ENGAGEMENT_RANGE);
+  // Ships spawn out to ENGAGEMENT_RANGE * 2.8 (main.js). Stars are depth-tested,
+  // so anything solid beyond the shell would punch a hole through the sky.
+  ok('star shell clears the furthest spawn', STAR_SHELL > ENGAGEMENT_RANGE * 2.8 * 2,
+    `stars ${STAR_SHELL}, furthest spawn ${ENGAGEMENT_RANGE * 2.8}`);
+  ok('sky sits outside the stars', SKY_SHELL > STAR_SHELL);
+  // Depth testing being off does not exempt a vertex from far-plane clipping.
+  ok('far plane clears the sky', CAMERA_FAR > SKY_SHELL,
+    `far ${CAMERA_FAR}, sky ${SKY_SHELL}`);
+}
+
+// --- the dust wrap ------------------------------------------------------------
+// The wrap now runs in the vertex shader, where nothing headless can reach it.
+// Space.wrap is the same expression in JS. If this drifts, dust either piles up
+// in a slab on one side of the ship or vanishes entirely — both of which look
+// like "the dust is broken" and neither of which points at a modulo.
+{
+  const span = 1300;
+  const w = (d) => Space.wrap(d, span);
+  ok('wrap leaves an in-range offset alone', w(500) === 500);
+  ok('wrap leaves a negative in-range offset alone', w(-500) === -500);
+  ok('wrap folds a mote off the front to the back', w(span + 200) === -span + 200);
+  ok('wrap folds a mote off the back to the front', w(-span - 200) === span - 200);
+  // The camera can be many cube-widths from where the motes were seeded, so the
+  // fold has to survive arbitrary multiples, not just one.
+  ok('wrap survives many cube widths', w(500 + span * 20) === 500);
+  ok('wrap survives many negative cube widths', w(500 - span * 20) === 500);
+  for (let i = -50; i <= 50; i += 0.37) {
+    const d = i * span;
+    ok(`wrap stays inside the cube at ${d.toFixed(0)}`, w(d) >= -span && w(d) < span);
+  }
+}
+
+// --- shield facet attribution ------------------------------------------------
+// Two code paths decide which facet a threat is on: the ray walk in
+// gatherRayHits and the bearing lookup in faceFor, used by blasts. They once
+// disagreed about the X axis — +X is PORT, and faceFor called it starboard — so
+// a warhead off the port beam drained the wrong facet and the HUD named the
+// wrong side of the ship. Pin both to the same answer.
+{
+  const ship = Object.create(Ship.prototype);
+  ship.body = { quat: new Quaternion() };
+  ship.shieldRadii = HULLS.meridian.shield.radii;
+  const face = (x, y, z) => ship.faceFor(new Vector3(x, y, z));
+  ok('faceFor: +X is the PORT facet', face(1, 0, 0) === 'port', face(1, 0, 0));
+  ok('faceFor: -X is the STARBOARD facet', face(-1, 0, 0) === 'stbd', face(-1, 0, 0));
+  ok('faceFor: +Y is DORSAL', face(0, 1, 0) === 'dorsal', face(0, 1, 0));
+  ok('faceFor: -Y is VENTRAL', face(0, -1, 0) === 'ventral', face(0, -1, 0));
+  ok('faceFor: +Z is FORE', face(0, 0, 1) === 'fore', face(0, 0, 1));
+  ok('faceFor: -Z is AFT', face(0, 0, -1) === 'aft', face(0, 0, -1));
 }
 
 // --- shields ----------------------------------------------------------------
@@ -556,6 +715,299 @@ for (const [id, h] of Object.entries(HULLS)) {
   ok('an internal detonation outranks shellfire by orders of magnitude',
     (cookoff / HULLS.meridian.mass) / dv('meridian') > 100,
     `${((cookoff / HULLS.meridian.mass) / dv('meridian')).toFixed(0)}x`);
+}
+
+// --- hardware ---------------------------------------------------------------
+// The kit is generated by tools/kit_build.py and checked in as base64. Nothing
+// at runtime validates it, so a truncated or mis-declared buffer would show up
+// as silently missing geometry in the middle of a fight. It is cheap to catch
+// here instead.
+{
+  for (const [name, p] of Object.entries(PARTS)) {
+    const g = partGeometry(name);
+    ok(`kit part ${name} decodes`, !!g);
+    if (!g) {
+      continue;
+    }
+    ok(`kit part ${name} has the declared vertex count`,
+      g.getAttribute('position').count === p.v,
+      `${g.getAttribute('position').count} vs ${p.v}`);
+    ok(`kit part ${name} has the declared triangle count`,
+      g.getIndex().count === p.t * 3, `${g.getIndex().count / 3} vs ${p.t}`);
+    ok(`kit part ${name} indexes only vertices it has`,
+      Math.max(...g.getIndex().array) < p.v);
+    // Normals arrive as signed bytes and are useless if any came out zero.
+    const n = g.getAttribute('normal').array;
+    let degenerate = 0;
+    for (let i = 0; i < n.length; i += 3) {
+      if (n[i] === 0 && n[i + 1] === 0 && n[i + 2] === 0) {
+        degenerate++;
+      }
+    }
+    ok(`kit part ${name} has no zero normals`, degenerate === 0, `${degenerate}`);
+  }
+
+  // Every compartment style and every weapon in the armoury has to have
+  // hardware, or a hull will silently render a box or a mount will be invisible.
+  for (const style of SHELL_STYLES) {
+    ok(`shell exists for style "${style}"`, !!shellGeometry(style));
+  }
+  const styles = new Set();
+  for (const hull of Object.values(HULLS)) {
+    for (const s of hull.sections) {
+      styles.add(s.style);
+    }
+  }
+  for (const s of styles) {
+    ok(`hulls only use styles the kit models ("${s}")`, SHELL_STYLES.includes(s));
+  }
+  for (const w of Object.values(WEAPONS)) {
+    ok(`${w.id} has a modelled gun`, !!PARTS[`gun_${w.id}`]);
+    ok(`${w.id} has muzzle points`, Array.isArray(MUZZLES[w.id]) && MUZZLES[w.id].length > 0);
+  }
+  for (const style of ['turret', 'gimbal', 'fixed']) {
+    ok(`mount style "${style}" has a base`, !!PARTS[`base_${style}`]);
+    ok(`mount style "${style}" has a pivot height`, typeof PIVOTS[style] === 'number');
+  }
+
+  // Face selection. This is the part that is easy to get wrong and impossible
+  // to notice from the numbers: a broadside battery sits near the bow end of
+  // its compartment, so the NEAREST face is the bow face — and a turret bolted
+  // there trains about its own barrel and stands the guns straight up.
+  {
+    const f = mountFrame([-2.0, 2.4, 8], [9.5, 8.0, 11.0], [0.22, 0, 1], 'hull');
+    ok('a broadside battery is bolted to the deck, not to the bow face',
+      f.up.y === 1, `up ${f.up.toArray()}`);
+    ok('and it is stood out onto the plating',
+      f.lift > 4 && f.lift < 8 - 2.4, `${f.lift}`);
+    ok('with its rest bearing flattened into that deck',
+      Math.abs(f.fwd.y) < 1e-9 && f.fwd.z > 0.9, `fwd ${f.fwd.toArray()}`);
+  }
+  {
+    // A gimbal in the nose of a pod: here proximity SHOULD win, because the
+    // bearing is square to the outboard face and parallel to the bow face.
+    const f = mountFrame([-1.6, 0, 7.5], [4.5, 3.0, 9.0], [0, 0, 1], 'wing');
+    ok('a pod gimbal sits on the outboard face', f.up.x === -1, `up ${f.up.toArray()}`);
+  }
+  {
+    // Ventral ordnance stays ventral.
+    const f = mountFrame([0, -4.2, 12], [11, 9, 16], [0, -0.04, 1], 'hull');
+    ok('ventral tubes are bolted under the hull', f.up.y === -1, `up ${f.up.toArray()}`);
+  }
+  {
+    // The taper case. A mount near the nose of a prow is authored OUTSIDE the
+    // shell — the compartment box says the skin is at 13 m but the shell has
+    // narrowed to 6 m by then — so the lift has to be negative and pull the
+    // gun in. Getting this wrong leaves ordnance hanging in space off the bow.
+    const f = mountFrame([0, -9, 14], [16, 13, 20], [0, -0.04, 1], 'prow');
+    ok('a mount on a tapered bow is pulled in to the skin, not pushed out',
+      f.lift < 0, `lift ${f.lift}`);
+    const y = -9 + f.up.y * f.lift;
+    ok('and it lands on the prow profile rather than on the bounding box',
+      y > -7 && y < -5, `y ${y.toFixed(2)}`);
+  }
+  {
+    // Flat-sided compartments must not be dragged around by the new profile.
+    const f = mountFrame([0, 11, -10], [14, 11, 22], [0, 0.5, -0.5], 'hull');
+    ok('a mount already on the skin of a flat compartment barely moves',
+      Math.abs(f.lift) < 1.2, `lift ${f.lift}`);
+  }
+
+  // The frame's quaternion has to agree with the vectors it was built from, or
+  // the rig will be posed in one basis and the muzzle solved in another.
+  {
+    const f = mountFrame([0, 8, 6], [9.5, 8.0, 11.0], [0, 0, 1]);
+    const up = new Vector3(0, 1, 0).applyQuaternion(f.quat);
+    const fwd = new Vector3(0, 0, 1).applyQuaternion(f.quat);
+    ok('the mount quaternion carries +Y onto the hull normal',
+      up.distanceTo(f.up) < 1e-6, `${up.toArray()}`);
+    ok('and +Z onto the rest bearing', fwd.distanceTo(f.fwd) < 1e-6, `${fwd.toArray()}`);
+    // Right-handed, or the turret trains the wrong way round.
+    const right = new Vector3(1, 0, 0).applyQuaternion(f.quat);
+    ok('and the basis is right-handed',
+      right.distanceTo(f.up.clone().cross(f.fwd)) < 1e-6);
+  }
+
+  // The same invariant from the other side. A compartment box is what a round
+  // is tested against, so a shell that reaches well past it is hull you can see
+  // and cannot shoot — and the repeater's whole stated job is shooting off
+  // radiators and sensor masts. Ribs and fins standing a little proud is the
+  // point of them; drive bells hanging 42% of a compartment aft of it was not.
+  {
+    let worst = 0;
+    let worstPart = '';
+    for (const name of Object.keys(PARTS)) {
+      if (!name.startsWith('shell_') || name.endsWith('_glass')) {
+        continue;
+      }
+      const pos = partGeometry(name).getAttribute('position').array;
+      for (let i = 0; i < pos.length; i++) {
+        // Shells are modelled in the unit cube, so anything past 0.5 is spill.
+        const over = Math.abs(pos[i]) - 0.5;
+        if (over > worst) {
+          worst = over;
+          worstPart = name;
+        }
+      }
+    }
+    ok('no shell reaches far outside the compartment it is drawn for',
+      worst <= 0.15, `${worstPart} spills ${(worst * 200).toFixed(0)}% of a half-extent`);
+  }
+
+  // Modules fitting inside their compartment's SHELL — not merely inside the
+  // raycast box — is enforced by `validate` in hulls.js, which throws at import.
+  // There is deliberately no assertion for it here: if it were ever violated
+  // this file could not load far enough to report it, so the check has to live
+  // where the tables are compiled rather than where they are tested.
+
+  // A gun is a machine standing on a deck. It may not point through the deck,
+  // and the ship's own pilot has to know that.
+  {
+    const floor = -Math.sin(MOUNT_DEPRESSION);
+
+    // Authoring invariant: a rest bearing below the floor would leave a mount
+    // permanently clamped, quietly off its authored bearing forever.
+    let worstRest = 0;
+    let worstId = '';
+    for (const hull of Object.values(HULLS)) {
+      for (const def of hull.hardpoints) {
+        const s = hull.sectionById[def.section];
+        const f = mountFrame(def.pos, s.half, def.dir, s.style);
+        const elev = new Vector3(...def.dir).normalize().dot(f.up);
+        if (elev < worstRest) {
+          worstRest = elev;
+          worstId = `${hull.id}/${def.id}`;
+        }
+      }
+    }
+    ok('no mount rests below the face it is bolted to',
+      worstRest >= floor, `${worstId} rests at ${(Math.asin(worstRest) * 57.3).toFixed(1)}deg`);
+
+    // The clamp itself. A demand well under the deck must come back sitting
+    // exactly on the depression limit, and must keep its train — a gun denied
+    // elevation stops at the plating, it does not swing off the bearing.
+    const ship = Object.create(Ship.prototype);
+    ship.body = { quat: new Quaternion() };
+    const up = new Vector3(0, 1, 0);
+    for (const demand of [
+      new Vector3(0.2, -1, 0.3), new Vector3(0, -1, 0.05),
+      new Vector3(-0.8, -0.6, 0.1), new Vector3(0.1, -0.02, 1),
+    ]) {
+      const mount = {
+        up: up.clone(),
+        rest: new Vector3(0, 0, 1),
+        aim: demand.clone().normalize(),
+      };
+      const before = mount.aim.clone();
+      ship._clampToMount(mount);
+      const elev = mount.aim.dot(up);
+      ok(`a mount denied elevation stops at the deck (${before.toArray().map((v) => v.toFixed(1))})`,
+        elev >= floor - 1e-9, `${(Math.asin(elev) * 57.3).toFixed(2)}deg`);
+      // Train preserved: the horizontal component points the same way.
+      const az0 = new Vector3(before.x, 0, before.z);
+      const az1 = new Vector3(mount.aim.x, 0, mount.aim.z);
+      if (az0.lengthSq() > 1e-6) {
+        ok('...without being swung off its bearing',
+          az0.normalize().dot(az1.normalize()) > 0.9999);
+      }
+      ok('...and stays a unit vector', Math.abs(mount.aim.length() - 1) < 1e-9);
+    }
+    // A bearing that was already legal must not be touched at all.
+    {
+      const mount = {
+        up: up.clone(), rest: new Vector3(0, 0, 1), aim: new Vector3(0.3, 0.5, 1).normalize(),
+      };
+      const before = mount.aim.clone();
+      ship._clampToMount(mount);
+      ok('a mount that can already bear is left alone', mount.aim.distanceTo(before) === 0);
+    }
+
+    // And the pilot: a contact abeam has to be rolled ONTO the deck, not under
+    // the keel. Rolling the wrong way masks the broadside the AI is turning to
+    // bring to bear, which is the bug this sign fixes.
+    {
+      const pilot = Object.create(Pilot.prototype);
+      pilot.ship = { body: { quat: new Quaternion() } };
+      pilot.reflex = 1;
+      const cmd = { yaw: 0, pitch: 0, roll: 0 };
+      // +X is PORT in this frame, so a target to port must roll the deck to port.
+      pilot._steer(cmd, new Vector3(1, 0, 0.2).normalize(), 1 / 60);
+      ok('a contact to port is rolled onto the deck, not under the keel',
+        cmd.roll < -0.2, `roll ${cmd.roll.toFixed(2)}`);
+      pilot._steer(cmd, new Vector3(-1, 0, 0.2).normalize(), 1 / 60);
+      ok('and the same to starboard, the other way', cmd.roll > 0.2, `roll ${cmd.roll.toFixed(2)}`);
+      // Already overhead: nothing to do.
+      pilot._steer(cmd, new Vector3(0, 1, 0.2).normalize(), 1 / 60);
+      ok('a contact already overhead is not rolled about',
+        Math.abs(cmd.roll) < 0.05, `roll ${cmd.roll.toFixed(2)}`);
+    }
+  }
+
+  // Decals are placed from a ray tested against the compartment BOX, but the
+  // shell is inscribed in that box and tapers. Left alone, every scorch mark
+  // hovers off the plating — by ~1 m down a flank and by several at a bow.
+  {
+    const hull = HULLS.meridian;
+    const ship = Object.create(Ship.prototype);
+    ship.hull = hull;
+    const com = hull.com;
+    const seat = (sec, axis, sign, z) => {
+      const p = new Vector3(
+        sec.pos[0] - com[0], sec.pos[1] - com[1], sec.pos[2] - com[2] + z);
+      p.setComponent(axis, p.getComponent(axis) + sign * sec.half[axis]);
+      const n = new Vector3();
+      n.setComponent(axis, sign);
+      const before = p.clone();
+      ship._seatOnSkin(p, n);
+      return { moved: before.distanceTo(p), p, before };
+    };
+
+    const flank = hull.sections.find((s) => s.style === 'hull');
+    const r = seat(flank, 1, 1, 0);
+    ok('a decal on a flat compartment is pulled onto the shell',
+      r.moved > 0.1 && r.moved < 2.0, `moved ${r.moved.toFixed(2)} m`);
+
+    const bow = hull.sections.find((s) => s.style === 'prow');
+    const rb = seat(bow, 1, -1, bow.half[2] * 0.7);
+    ok('and a decal near a tapered bow moves a lot further',
+      rb.moved > r.moved * 2, `moved ${rb.moved.toFixed(2)} m`);
+    ok('but never past the compartment centreline',
+      Math.abs(rb.p.y - (bow.pos[1] - com[1])) < bow.half[1], `${rb.p.y.toFixed(2)}`);
+
+    // Fore and aft faces are not tapered, so a hit on one must not be shifted.
+    const rz = seat(flank, 2, 1, 0);
+    ok('a decal on a fore or aft face is left where it landed',
+      rz.moved === 0, `moved ${rz.moved}`);
+
+    // And a stray point nowhere near the hull must be left alone rather than
+    // snapped onto whichever compartment happened to be nearest.
+    const far = new Vector3(0, 900, 0);
+    const fb = far.clone();
+    ship._seatOnSkin(far, new Vector3(0, 1, 0));
+    ok('a point nowhere near the hull is not snapped to it', far.equals(fb));
+  }
+
+  // Train and elevation are recovered from the aim vector by _syncMounts using
+  // atan2(x, z) and atan2(-y, hypot(x, z)). Assert the pair actually inverts:
+  // compose the two rotations and check the barrel lands back on the demand.
+  {
+    const demands = [
+      new Vector3(0, 0, 1), new Vector3(1, 0, 1), new Vector3(-0.3, 0.5, 1),
+      new Vector3(0.6, -0.4, -0.7), new Vector3(0, 0.9, 0.1),
+    ];
+    let worst = 0;
+    for (const d of demands) {
+      d.normalize();
+      const yaw = Math.atan2(d.x, d.z);
+      const pitch = Math.atan2(-d.y, Math.hypot(d.x, d.z));
+      const bore = new Vector3(0, 0, 1)
+        .applyQuaternion(new Quaternion().setFromEuler(new Euler(pitch, 0, 0)))
+        .applyQuaternion(new Quaternion().setFromEuler(new Euler(0, yaw, 0)));
+      worst = Math.max(worst, bore.distanceTo(d));
+    }
+    ok('train and elevation put the bore back on the demanded bearing',
+      worst < 1e-9, `worst error ${worst.toExponential(2)}`);
+  }
 }
 
 // --- report -----------------------------------------------------------------

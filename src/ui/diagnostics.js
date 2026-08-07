@@ -9,7 +9,10 @@
 //             never disagree about whether something is in trouble.
 //   CUTAWAY   a true scale drawing of the hull in plan and profile, built from
 //             the same compartment boxes the ballistics solver tests against.
-//             What you see here is exactly what a round will hit.
+//             What you see here is exactly what a round will hit. Compartments
+//             are drawn to the shell's tapered profile rather than as plain
+//             rectangles, so the schematic and the ship outside agree on what
+//             shape the vessel is.
 //   CREW      where the people are, what they are doing, and how they are.
 //
 // The panel can be pointed at the locked target (to plan a shot) or at your own
@@ -18,7 +21,9 @@
 // -----------------------------------------------------------------------------
 import { SYSTEM_ORDER, NETS } from '../ship/hulls.js';
 import { moduleStatus, LEVEL, ATMO_CRITICAL } from '../ship/systems.js';
+import { XRAY_DRAW, XRAY_HOLD, XRAY_FADE } from '../ship/ship.js';
 import { clamp01, formatRange } from '../core/mathx.js';
+import { skinFraction } from '../world/hardware.js';
 
 const LEVEL_CLASS = {
   [LEVEL.OK]: 'ok', [LEVEL.WARN]: 'warn', [LEVEL.CRIT]: 'crit', [LEVEL.DEAD]: 'dead',
@@ -33,6 +38,36 @@ const ROLE_COLOR = {
 
 /** Divisions of a few hundred draw as a bar, not a dot. */
 const CREW_DOT = 3.4;
+
+/**
+ * How a penetration trace draws. The round is animated ALONG its path rather
+ * than appearing whole, because the question the display exists to answer is
+ * "where did it go", and a static line does not carry direction.
+ */
+const XRAY_COLOR = {
+  shield: [130, 210, 255],
+  shieldStop: [130, 210, 255],
+  wall: [235, 245, 255],
+  wallStop: [255, 190, 90],
+  exit: [235, 245, 255],
+  surface: [255, 190, 90],
+  ricochet: [255, 235, 150],
+  module: [255, 110, 90],
+  moduleStop: [255, 110, 90],
+  stop: [255, 190, 90],
+};
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+/** Joules for a human. The cutaway has no room for exponent notation. */
+function energyText(j) {
+  if (j >= 1e6) {
+    return `${(j / 1e6).toFixed(j >= 1e7 ? 0 : 1)} MJ`;
+  }
+  if (j >= 1e3) {
+    return `${Math.round(j / 1e3)} kJ`;
+  }
+  return `${Math.round(j)} J`;
+}
 
 export class Diagnostics {
   /**
@@ -52,6 +87,8 @@ export class Diagnostics {
     this.crewEl = document.getElementById(`${prefix}Crew`);
     this.canvas = document.getElementById(`${prefix}Cutaway`);
     this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
+    this.hitsEl = document.getElementById(`${prefix}Hits`);
+    this._hitsHtml = '';
     this.visible = true;
     this._rows = new Map();
     this._builtFor = null;
@@ -189,6 +226,66 @@ export class Diagnostics {
 
     this._renderCrew(ship);
     this._renderCutaway(ship);
+    this._renderHits(ship);
+  }
+
+  /**
+   * The penetration log in words. The drawing shows where a round went; this
+   * says what it found, in order, and what that cost — which is the part you
+   * cannot read off a line on a schematic.
+   */
+  _renderHits(ship) {
+    if (!this.hitsEl) {
+      return;
+    }
+    let html = '';
+    for (let i = ship.xray.length - 1; i >= 0 && html.length < 900; i--) {
+      const path = ship.xray[i];
+      const inside = path.nodes.filter((n) => n.kind === 'module'
+        || n.kind === 'moduleStop');
+      if (path.nodes.length === 0) {
+        continue;
+      }
+      const fade = clamp01(1 - (path.age - XRAY_HOLD) / (XRAY_FADE - XRAY_HOLD));
+      const last = path.nodes[path.nodes.length - 1];
+      // A round that crossed the far wall left the ship; calling that
+      // "stopped" is exactly backwards, and a through-and-through that found
+      // nothing is a real and useful outcome to be able to read.
+      const VERB = {
+        exit: 'THROUGH', ricochet: 'DEFLECTED', shieldStop: 'FIELD CAUGHT',
+        surface: 'PLATE ONLY', wallStop: 'STOPPED', stop: 'STOPPED',
+      };
+      const verb = inside.length > 0 ? 'PENETRATED' : (VERB[last.kind] || 'STOPPED');
+      const cls = inside.some((n) => n.killed) ? 'crit'
+        : (inside.length > 0 ? 'warn' : 'ok');
+      // What it found inside if it got inside; otherwise the compartments it
+      // went through, which for a clean penetrator is the interesting part —
+      // that line of opened compartments is the damage.
+      let what;
+      if (inside.length > 0) {
+        what = inside.map((n) => (n.killed ? `<b>${n.label}</b>` : n.label)).join(' → ');
+      } else {
+        const crossed = [];
+        for (const n of path.nodes) {
+          if (n.label && crossed[crossed.length - 1] !== n.label) {
+            crossed.push(n.label);
+          }
+        }
+        what = crossed.join(' → ') || last.label;
+      }
+      html += `<div class="hit-row ${cls}" style="opacity:${fade.toFixed(2)}">`
+        + `<span class="hit-verb">${verb}</span>`
+        + `<span class="hit-what">${what}</span>`
+        + `<span class="hit-e">${energyText(path.nodes.reduce((a, n) => a + n.e, 0))}</span>`
+        + '</div>';
+    }
+    if (!html) {
+      html = '<div class="hit-idle">NO RECENT IMPACTS</div>';
+    }
+    if (this._hitsHtml !== html) {
+      this._hitsHtml = html;
+      this.hitsEl.innerHTML = html;
+    }
   }
 
   _renderCrew(ship) {
@@ -256,6 +353,26 @@ export class Diagnostics {
     ];
     const cxOf = () => W / 2;
 
+    // Which modules have been struck recently, and how hard. Derived from the
+    // traces rather than stored on the modules, so nothing in the simulation
+    // has to know a display exists.
+    const struck = new Map();
+    for (const path of ship.xray) {
+      const glow = clamp01(1 - path.age / 1.8);
+      if (glow <= 0) {
+        continue;
+      }
+      for (const n of path.nodes) {
+        if (!n.id) {
+          continue;
+        }
+        const prev = struck.get(n.id);
+        if (!prev || glow > prev.glow) {
+          struck.set(n.id, { glow, killed: n.killed });
+        }
+      }
+    }
+
     for (const view of views) {
       // Bow points right.
       const px = (z) => cxOf() + z * scale;
@@ -277,20 +394,44 @@ export class Diagnostics {
         const w = x1 - x0;
         const h = y1 - y0;
 
+        /**
+         * The compartment as it is DRAWN, not as it is boxed.
+         *
+         * The cutaway used to be a row of rectangles, which was true when the
+         * hull was a row of boxes. It is not any more: shells taper, so a
+         * rectangle here would show a bow that is square in plan while the ship
+         * outside is a wedge, and every module seated against the real plating
+         * would read as floating in from the edge for no reason.
+         *
+         * Four corners, because the two faces of an axis taper independently.
+         */
+        const axis = view.up;
+        const skin = (sign, end) => hu * skinFraction(
+          s.style, axis, sign, end * s.half[2], s.half[2]);
+        const outline = () => {
+          ctx.beginPath();
+          ctx.moveTo(x0, py(u + skin(1, -1)));
+          ctx.lineTo(x1, py(u + skin(1, 1)));
+          ctx.lineTo(x1, py(u - skin(-1, 1)));
+          ctx.lineTo(x0, py(u - skin(-1, -1)));
+          ctx.closePath();
+        };
+
         // Fill shows atmosphere: a vented compartment reads as empty.
         const atmo = st.atmo;
         ctx.fillStyle = `rgba(70,110,140,${0.06 + 0.20 * atmo})`;
-        ctx.fillRect(x0, y0, w, h);
+        outline();
+        ctx.fill();
         if (st.fire > 0) {
           const f = clamp01(st.fire / 6);
           ctx.fillStyle = `rgba(255,110,40,${0.18 + 0.4 * f})`;
-          ctx.fillRect(x0, y0, w, h);
+          outline();
+          ctx.fill();
         }
         if (atmo < ATMO_CRITICAL) {
           // Hatching marks a compartment nobody can work in without a suit.
           ctx.save();
-          ctx.beginPath();
-          ctx.rect(x0, y0, w, h);
+          outline();
           ctx.clip();
           ctx.strokeStyle = 'rgba(200,225,240,0.16)';
           ctx.lineWidth = 1;
@@ -312,7 +453,8 @@ export class Diagnostics {
         if (st.breached) {
           ctx.setLineDash([3, 3]);
         }
-        ctx.strokeRect(x0, y0, w, h);
+        outline();
+        ctx.stroke();
         ctx.setLineDash([]);
 
         // Modules.
@@ -339,6 +481,17 @@ export class Diagnostics {
             ctx.fillRect(mx - mw / 2, my - mh / 2, mw, mh);
           }
           ctx.globalAlpha = 1;
+          // Just been hit: flare the box so the eye is pulled to it before the
+          // trace line has even finished drawing.
+          const hit = struck.get(def.id);
+          if (hit) {
+            ctx.strokeStyle = hit.killed
+              ? `rgba(255,90,70,${(0.35 + 0.65 * hit.glow).toFixed(2)})`
+              : `rgba(255,170,90,${(0.3 + 0.6 * hit.glow).toFixed(2)})`;
+            ctx.lineWidth = 1 + 1.6 * hit.glow;
+            const g = 2 + 3 * hit.glow;
+            ctx.strokeRect(mx - mw / 2 - g, my - mh / 2 - g, mw + g * 2, mh + g * 2);
+          }
           if (def.id === this._selected) {
             ctx.strokeStyle = '#ffe08a';
             ctx.lineWidth = 1.4;
@@ -369,6 +522,127 @@ export class Diagnostics {
         ctx.globalAlpha = 0.4 + 0.6 * strength;
         ctx.fill();
         ctx.globalAlpha = 1;
+      }
+
+      // Shell paths last of all, over everything they went through.
+      this._drawTraces(ctx, ship, px, py, view.up);
+    }
+  }
+
+  /**
+   * The penetration traces, drawn over the compartments they crossed.
+   *
+   * Each round walks its own path as it is replayed, so a burst reads as a
+   * sequence of separate shots arriving rather than as a fan of static lines,
+   * and the direction of attack is obvious without an arrowhead. Markers say
+   * what happened at each layer: a tick for plate crossed, a dot for something
+   * found inside, a ring for something finished, an X where the round stopped.
+   */
+  _drawTraces(ctx, ship, px, py, up) {
+    const projX = (n) => px(n.z);
+    const projY = (n) => py(up === 0 ? n.x : n.y);
+
+    for (const path of ship.xray) {
+      const n = path.nodes;
+      if (n.length === 0) {
+        continue;
+      }
+      const alpha = path.age <= XRAY_HOLD
+        ? 1
+        : clamp01(1 - (path.age - XRAY_HOLD) / (XRAY_FADE - XRAY_HOLD));
+      if (alpha <= 0.01) {
+        continue;
+      }
+      // Travel: how far along the path the replay has got, by arc length in
+      // real metres so the round moves at a constant speed through the drawing
+      // rather than jumping between widely-spaced layers.
+      const seg = [];
+      let total = 0;
+      for (let i = 1; i < n.length; i++) {
+        const d = Math.hypot(n[i].x - n[i - 1].x, n[i].y - n[i - 1].y, n[i].z - n[i - 1].z);
+        seg.push(d);
+        total += d;
+      }
+      const travelled = total * clamp01(path.age / XRAY_DRAW);
+
+      // The line, laid down twice: a wide soft glow and a hot thin core.
+      for (const pass of [{ w: 3.2, a: 0.16 }, { w: 1.1, a: 0.9 }]) {
+        ctx.strokeStyle = `rgba(255,236,205,${(alpha * pass.a).toFixed(3)})`;
+        ctx.lineWidth = pass.w;
+        ctx.beginPath();
+        ctx.moveTo(projX(n[0]), projY(n[0]));
+        let run = 0;
+        for (let i = 1; i < n.length; i++) {
+          const d = seg[i - 1];
+          if (run + d <= travelled || total === 0) {
+            ctx.lineTo(projX(n[i]), projY(n[i]));
+          } else {
+            // Partial segment: stop the line where the round has got to.
+            const f = d > 0 ? (travelled - run) / d : 0;
+            ctx.lineTo(
+              projX(n[i - 1]) + (projX(n[i]) - projX(n[i - 1])) * f,
+              projY(n[i - 1]) + (projY(n[i]) - projY(n[i - 1])) * f,
+            );
+            break;
+          }
+          run += d;
+        }
+        ctx.stroke();
+      }
+
+      // Markers, revealed as the round reaches them.
+      let run = 0;
+      for (let i = 0; i < n.length; i++) {
+        if (i > 0) {
+          run += seg[i - 1];
+        }
+        if (run > travelled && total > 0) {
+          break;
+        }
+        const node = n[i];
+        const c = XRAY_COLOR[node.kind] || [255, 255, 255];
+        const x = projX(node);
+        const y = projY(node);
+        const k = node.kind;
+        if (k === 'module' || k === 'moduleStop') {
+          ctx.fillStyle = rgba(c, alpha);
+          ctx.beginPath();
+          ctx.arc(x, y, node.killed ? 3.2 : 2.2, 0, Math.PI * 2);
+          ctx.fill();
+          if (node.killed) {
+            ctx.strokeStyle = rgba(c, alpha * 0.8);
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.arc(x, y, 5.6, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        } else if (k === 'stop' || k === 'wallStop' || k === 'surface') {
+          ctx.strokeStyle = rgba(c, alpha);
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.moveTo(x - 3, y - 3); ctx.lineTo(x + 3, y + 3);
+          ctx.moveTo(x + 3, y - 3); ctx.lineTo(x - 3, y + 3);
+          ctx.stroke();
+        } else if (k === 'ricochet') {
+          ctx.strokeStyle = rgba(c, alpha);
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(x, y, 3.4, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (k === 'shield' || k === 'shieldStop') {
+          ctx.strokeStyle = rgba(c, alpha * 0.9);
+          ctx.lineWidth = k === 'shieldStop' ? 2 : 1;
+          ctx.beginPath();
+          ctx.arc(x, y, 4.2, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          // Plate crossed: a short tick square to the path.
+          ctx.strokeStyle = rgba(c, alpha * 0.85);
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(x, y - 2.6); ctx.lineTo(x, y + 2.6);
+          ctx.stroke();
+        }
       }
     }
   }

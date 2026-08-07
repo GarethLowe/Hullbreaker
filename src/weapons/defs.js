@@ -189,6 +189,10 @@ export const WEAPONS = {
     mass: 4000,
     muzzleVel: 120,
     accel: 210,
+    // Motor burn-out. A seeker is only as good as the turn it can still make at
+    // speed, so this is the number that decides whether the tubes are a threat
+    // or a firework — not `accel`.
+    topSpeed: 620,
     turnRate: 0.55,
     fuse: 42.0,
     ap: 1.1,

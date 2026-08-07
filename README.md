@@ -116,6 +116,8 @@ src/
     audio.js             fully procedural Web Audio (noise bursts + FM blips)
   world/
     assets.js            runtime-generated textures, materials, environment probe
+    kit.js               GENERATED: hull shells + weapon hardware, as geometry
+    hardware.js          decodes the kit; works out how a gun sits on a hull
     space.js             starfield, wrapping dust field, nebula, lighting
   ship/
     hulls.js             DATA: four ship classes — compartments, modules, networks
@@ -133,8 +135,104 @@ src/
     targeting.js         contact tracking, lock, subsystem select, 3D radar
     diagnostics.js       live system tree + hull cutaway + crew roster
   fx/fx.js               pooled particles, streaks, debris, light flashes
-test/selfcheck.js        81 headless assertions over the simulation
+test/selfcheck.js        headless assertions over the simulation
+tools/                   Blender modelling source for the kit + preview rigs
 ```
+
+### Every gun is a real machine
+
+A compartment is not drawn as a box and a weapon is not drawn as nothing. Both
+come out of one kit — twenty-one parts, about 7,600 triangles all told —
+modelled in Blender by `tools/kit_build.py` and compiled to `src/world/kit.js`.
+Still no binary assets: the models are code, and `kit.js` is what that code
+produces.
+
+Hull shells are modelled to fill the unit cube, because the runtime scales them
+by a compartment's half-extents and those boxes are also the damage model's
+raycast volumes. What you can see is still exactly what you can shoot.
+
+Weapons are separate items, carried three ways, and the hull tables already said
+which is which — `arc`, the traverse a mount has, is the whole taxonomy:
+
+| carriage | when | what it is |
+|-|-|-|
+| turret | `arc >= 0.25` | barbette ring, rotating house, trunnions |
+| gimbal | `arc < 0.25` | ball in a socket set into the plating |
+| fixed | ordnance | tubes in an armoured fairing; nothing moves |
+
+Each is assembled at runtime as a hierarchy that mirrors the machine — base,
+train, elevate, gun — and the gunnery model drives it directly. `_syncMounts`
+takes the one world vector the solver already decided on, `mount.aim`, and
+decomposes it into the two angles the mount can physically make. Nothing is
+animated independently, so the barrel cannot disagree with the shot.
+
+That matters because the muzzle is now load-bearing: rounds spawn from the tip
+of the barrel that fired, multi-barrel mounts alternate, and guns recoil on the
+shot. A wrecked mount stops training and its barrel drops, which reads from
+further out than any damage decal.
+
+#### A gun cannot shoot through its own deck
+
+`arc` is a symmetric cone about the rest bearing, and for a long time nothing
+knew the deck was there: every mount aboard could swing its barrel down through
+its own plating — the broadsides to 26 degrees below their ring, the point
+defence to 42 — and the shot went with it.
+
+A mount may now depress about five degrees below the face it is bolted to and no
+further, which is roughly what a real barbette allows before the breech fouls
+its own ring. It is applied after the traverse arc rather than before it: the
+arc is authored, this is physical, and when the two disagree the metal wins. A
+gun denied elevation stops at the plating rather than swinging off its bearing,
+and `onTarget` then reports false on its own — nothing had to be told that a
+masked gun should hold fire, because a masked gun simply is not pointing at
+anything.
+
+The consequence is real blind arcs under the keel, so the pilot had to learn
+about them. It already rolled a contact onto the pitch axis — the strongest on
+every hull — but it rolled to whichever side came first, and for a target abeam
+that was reliably the ventral one: the ship turned to face a contact and masked
+its own broadside doing it. It now rolls the contact onto the DECK. Same
+manoeuvre, aimed properly.
+
+#### The inside agrees with the outside
+
+A compartment box is what the ballistics solver tests against; the shell is
+inscribed in that box and tapers. Everything that has to touch the visible hull
+goes through one measured table — `SKIN` in the generated `kit.js`, taken off
+the built shells by the exporter, per face, at each end.
+
+That table is what keeps the ship coherent in three places at once:
+
+- **Modules.** The interiors are authored to the shells, not clamped to fit
+  them. Re-shaping the hulls put fifty-eight modules outside the visible
+  plating — bow sensors floating clear of a wedge, radiators and magazines
+  hanging out of the sides of tapered sponsons — and each family was re-fitted
+  to the form it now lives in rather than nudged until the numbers passed. Bow
+  arrays became long and narrow on the centreline instead of wide slabs across
+  a nose that no longer exists; sponson radiators became long thin panels that
+  stop before the pod starts tapering; broadside magazines dropped low and
+  inboard, which is where a magazine belongs anyway. `validate` then enforces
+  it strictly, and throws at load rather than quietly moving anything — a
+  silently relocated magazine changes what a shot into that sponson hits.
+- **The cutaway.** Compartments are drawn to the shell's real profile instead of
+  as rectangles, so the schematic stops claiming the bow is square while the
+  ship outside is a wedge.
+- **Shells themselves.** They are held to the box from the other side too. A
+  drive bell hanging 42% of a compartment aft of it is hull you can see and
+  cannot shoot, in a game where the repeater's entire job is shooting off
+  radiators and sensor masts.
+
+The shell-versus-box checks run in `npm test`; module containment is enforced
+by `validate` at import, so a hull that no longer fits its own plating cannot
+load at all.
+
+Working out where a gun stands is the fiddly part, and `hardware.js` derives it
+rather than making the tables repeat themselves. A face is scored on proximity
+AND on being square to the gun's rest bearing: the nearest face to a broadside
+battery is the bow face, and a turret bolted there would train about its own
+barrels. The shells taper, so the mount is then stood on the shell's actual skin
+rather than on the compartment's bounding box — the difference is metres at a
+prow, and it is why the BASTION's tubes are on the hull instead of alongside it.
 
 ### There is no physics engine
 

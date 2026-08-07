@@ -21,7 +21,7 @@ import { ECS } from './core/ecs.js';
 import { Input } from './core/input.js';
 import { AudioEngine } from './core/audio.js';
 import { Assets } from './world/assets.js';
-import { Space } from './world/space.js';
+import { Space, CAMERA_NEAR, CAMERA_FAR } from './world/space.js';
 import { FX } from './fx/fx.js';
 import { HULLS, HULL_IDS, ENGAGEMENT_RANGE } from './ship/hulls.js';
 import { Ship } from './ship/ship.js';
@@ -76,8 +76,10 @@ class Game {
     // z^2 / (near * 2^24), so the old 0.4 m near gave ~9 m of precision at
     // five kilometres — enough to make a cruiser's compartment boxes z-fight
     // into noise at exactly the distance the fight now happens.
+    // The planes live in space.js: the backdrop shells are what constrain them,
+    // and split across two files they drifted out of agreement.
     this.camera = new THREE.PerspectiveCamera(
-      68, window.innerWidth / window.innerHeight, 2.0, 260000,
+      68, window.innerWidth / window.innerHeight, CAMERA_NEAR, CAMERA_FAR,
     );
     this.ecs = new ECS();
     this.audio = new AudioEngine();
@@ -163,6 +165,9 @@ class Game {
     };
 
     this._onResize();
+    // Everything the game will ever draw, compiled and uploaded before the
+    // first real frame rather than the first time each thing is needed.
+    this.assets.warmUp(this.scene, this.camera, this.hulls);
     this.last = performance.now();
     requestAnimationFrame(() => this._frame());
   }
@@ -194,14 +199,27 @@ class Game {
     return ship;
   }
 
-  /** A wave of hostiles, dropped in a loose shell around the player. */
+  /**
+   * A wave of hostiles, dropped in a loose shell around the player.
+   *
+   * The ramp is deliberately slower than it was. Measured against the old
+   * table, an AI-flown MERIDIAN lost wave two — a picket and a frigate —
+   * four times out of four, and wave one killed it once in four. Some of that
+   * was the player's guns not working, but the shape was wrong regardless:
+   * two hulls by wave 2 and a dreadnought by wave 5 gives nobody time to learn
+   * what a coolant loop is for. Heavies now arrive as a single named problem
+   * before they arrive as a group.
+   */
   _spawnWave() {
     this.wave++;
-    const n = Math.min(4, 1 + Math.floor(this.wave / 2));
-    const pool = this.wave < 2 ? ['sabre']
-      : (this.wave < 3 ? ['sabre', 'sabre', 'halberd']
-        : (this.wave < 5 ? ['sabre', 'halberd', 'halberd', 'meridian']
-          : ['halberd', 'meridian', 'meridian', 'bastion']));
+    const w = this.wave;
+    const n = Math.min(4, 1 + Math.floor((w - 1) / 3));
+    const pool = w <= 2 ? ['sabre']
+      : (w <= 4 ? ['sabre', 'sabre', 'halberd']
+        : (w <= 6 ? ['sabre', 'halberd', 'halberd']
+          : (w <= 8 ? ['halberd', 'halberd', 'meridian']
+            : (w <= 10 ? ['halberd', 'meridian', 'meridian']
+              : ['halberd', 'meridian', 'meridian', 'bastion']))));
     for (let i = 0; i < n; i++) {
       const hullId = pick(pool);
       randomDirection(_v);
@@ -318,6 +336,45 @@ class Game {
     }
   }
 
+  /**
+   * Mission-kill bookkeeping. Latched rather than polled, because a damage
+   * control party can get a drive back and un-derelict a hull — that recovery
+   * should read as the enemy coming back, not as the kill being taken away.
+   */
+  _updateDerelict(ship, dt) {
+    // Debounced. Load shedding drops the drives to zero authority for a second
+    // at a time during a brownout — measured on a healthy BASTION twenty
+    // seconds into a fight — so an instantaneous test would condemn ships for a
+    // transient the crew fixes by itself. Being adrift has to stick.
+    ship.adriftT = ship.sys.isDerelict() ? (ship.adriftT || 0) + dt : 0;
+    const adrift = ship.adriftT > 3;
+    if (adrift && !ship.derelict) {
+      ship.derelict = true;
+      ship.derelictT = 0;
+      if (ship.faction === 'hostile' && !ship.scored) {
+        ship.scored = true;
+        this.kills++;
+        this.hud.warn(`${ship.name} MISSION KILLED — ADRIFT`);
+      } else if (ship.isPlayer) {
+        this.hud.warn('DRIVES AND FLIGHT COMPUTER LOST — ADRIFT');
+      }
+    } else if (!adrift && ship.derelict) {
+      ship.derelict = false;
+      if (ship.isPlayer) {
+        this.hud.warn('HELM RESTORED');
+      }
+    }
+    if (!ship.derelict) {
+      return;
+    }
+    ship.derelictT += dt;
+    // The player is never scuttled out from under themselves — they get to
+    // fight the hulk back to life, or die in it properly.
+    if (!ship.isPlayer && ship.derelictT > 45) {
+      this.onShipDestroyed(ship, 'abandoned');
+    }
+  }
+
   _director(dt) {
     // Retire wrecks, then decide whether it is time for more company.
     let hostiles = 0;
@@ -327,6 +384,15 @@ class Game {
       }
       if (!s.dead && s.sys.isStricken()) {
         this.onShipDestroyed(s, 'systems');
+      }
+      // A ship that has lost its drives and its computer is mission-killed, not
+      // destroyed: it is a hulk, adrift, with whatever guns still bear. It
+      // scores immediately so the wave can move on and the player is not made
+      // to chase a drifting corpse, but it stays in the world to be finished —
+      // or to keep shooting at them if they leave it. The abandon timer is the
+      // crew giving up on a ship they cannot fly.
+      if (!s.dead) {
+        this._updateDerelict(s, dt);
       }
       if (s.dead) {
         s.deadT += dt;
@@ -341,7 +407,7 @@ class Game {
           this.audio.boom(s.position, 1.5);
           this.ecs.destroy(s.entity);
         }
-      } else if (s.faction === 'hostile') {
+      } else if (s.faction === 'hostile' && !s.derelict) {
         hostiles++;
       }
     }
@@ -357,7 +423,12 @@ class Game {
     if (hostiles === 0 && !this.over) {
       this.waveTimer -= dt;
       if (this.waveTimer <= 0) {
-        this.waveTimer = 22;
+        // Long enough for the damage-control parties to actually achieve
+        // something. Repair is the most interesting system in the ship and at
+        // twenty-two seconds the player never got to watch it work — they went
+        // into every wave carrying all the damage from the last one, which is
+        // most of why the difficulty curve felt like a cliff.
+        this.waveTimer = 45;
         this._spawnWave();
       }
     }
@@ -372,8 +443,18 @@ class Game {
    * fragments, which are just very cheap projectiles and go through the normal
    * penetration solver.
    *
-   * So the energy a ship intercepts is the flux at its distance times the area
-   * it presents: `E / (4*pi*d^2) * pi*r^2`, which reduces to `E * r^2/(4d^2)`.
+   * The energy a ship intercepts is the fraction of the sphere it subtends. For
+   * a disc of radius `r` at distance `d` that is exactly
+   * `0.5 * (1 - d/sqrt(d^2 + r^2))`, which decays to the familiar `r^2/(4d^2)`
+   * in the far field and rises to one half at contact — where the hull fills a
+   * hemisphere. The old form used the far-field approximation everywhere with
+   * an arbitrary `d >= r/2` floor, which capped a contact hit at a quarter of
+   * the warhead and then measured `d` to the ship's CENTRE OF MASS, so a
+   * torpedo bursting on a cruiser's bow was scored as a detonation 134 metres
+   * away and delivered a fifth of its charge. Measuring to the compartment
+   * actually struck is what makes contact ordnance behave like contact
+   * ordnance; the far field is unchanged to three decimal places.
+   *
    * `radius` is only a culling distance and an effect size; it does no work.
    */
   explode(pos, opts) {
@@ -385,19 +466,23 @@ class Game {
       if (s.disposed) {
         continue;
       }
-      const d = s.position.distanceTo(pos);
-      if (d > radius * 3 + s.hitRadius) {
+      const centreD = s.position.distanceTo(pos);
+      if (centreD > radius * 3 + s.hitRadius) {
         continue;
       }
-      // Clamped at the surface: you cannot intercept more than was released.
+      // Range to the COMPARTMENT the flash is nearest, not to the ship's
+      // middle. On a 250 m hull those differ by more than a hundred metres,
+      // which is the whole difference between a contact hit and a near miss.
+      const host = this._nearestSection(s, pos);
+      const d = host ? s.sectionWorld(host, _v).distanceTo(pos) : centreD;
       const r = s.hitRadius;
-      const joules = Math.min(energy, energy * (r * r) / (4 * Math.max(d, r * 0.5) ** 2));
+      const joules = energy * 0.5 * (1 - d / Math.hypot(d, r));
       if (joules < 1e3) {
         continue;
       }
       // A charge that functioned INSIDE this hull is inside its shield too, so
       // the bubble gets no say. That is the entire argument for delay fuses.
-      const inside = opts.internal && d < s.hitRadius;
+      const inside = opts.internal && centreD < s.hitRadius;
       let through = joules;
       if (!inside) {
         // Otherwise the field catches it on whichever facet is turned toward
@@ -413,7 +498,6 @@ class Game {
         if (inside) {
           // An internal detonation wrecks the compartment it went off in and
           // everything bolted inside it, rather than scuffing the outer plate.
-          const host = this._nearestSection(s, pos);
           if (host) {
             s.sys.damageSection(host, through * 0.7, pos, null);
             s.sys.punchHole(host, 7.0);
@@ -477,7 +561,12 @@ class Game {
     randomDirection(_v);
     ship.body.omega.addScaledVector(_v, rand(0.15, 0.6));
     if (ship.faction === 'hostile') {
-      this.kills++;
+      // A hulk already scored when it went adrift; finishing it must not pay
+      // twice.
+      if (!ship.scored) {
+        ship.scored = true;
+        this.kills++;
+      }
       this.hud.warn(`${ship.name} DESTROYED (${cause.toUpperCase()})`);
     }
     if (this.pilots.has(ship)) {
@@ -636,6 +725,9 @@ class Game {
     }
     this.targetPanel.render();
     this.renderer.render(this.scene, this.camera);
+    // Target view, second pass, scissored into its frame on the same canvas.
+    // After the main render so it paints over it rather than under it.
+    this.hud.renderTargetView(this.renderer, this.scene);
   }
 
   _onResize() {

@@ -123,6 +123,8 @@
   .gauge .bar i { position: absolute; inset: 0 auto 0 0; width: 0%; display: block; }
   #hudShieldFill { background: linear-gradient(90deg, #2f6f9c, #7fd8ff); }
   #hudHullFill   { background: linear-gradient(90deg, #6d7d88, #d3e2ec); }
+  #hudDriveFill  { background: linear-gradient(90deg, #4a8f7a, #7ae6c0); }
+  #hudHelmTxt    { float: right; font-weight: 700; letter-spacing: 0.08em; }
   #hudPowerFill  { background: linear-gradient(90deg, #3f8f5f, var(--ok)); }
   #hudCapFill    { background: linear-gradient(90deg, #8a6bd0, #c3a6ff); }
   #hudFuelFill   { background: linear-gradient(90deg, #8a7a3f, #e4cf7a); }
@@ -235,6 +237,50 @@
     height: 190px;
     border-bottom: 1px solid var(--line);
   }
+  /* ---- penetration log, under the cutaway ---- */
+  .dc-hits {
+    flex: 0 0 auto;
+    max-height: 66px;
+    overflow: hidden;
+    border-bottom: 1px solid var(--line);
+    padding: 3px 0;
+    font-size: 9px;
+    letter-spacing: 0.03em;
+  }
+  .hit-row { display: flex; gap: 6px; line-height: 1.5; white-space: nowrap; }
+  .hit-row.ok   { color: var(--dim); }
+  .hit-row.warn { color: var(--warn); }
+  .hit-row.crit { color: var(--crit); }
+  .hit-verb { flex: 0 0 74px; font-weight: 700; }
+  .hit-what { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+  .hit-what b { color: #fff; font-weight: 700; }
+  .hit-e { flex: 0 0 auto; opacity: 0.75; }
+  .hit-idle { color: var(--dim); opacity: 0.5; line-height: 1.6; }
+
+  /* ---- target view (picture in picture) ----
+     A transparent, non-interactive frame. The image inside is a second render
+     pass drawn onto the main WebGL canvas at exactly this rect, so this element
+     supplies only the border, the caption and the layout rules — including
+     moving inboard when the target's damage-control panel is open, which the
+     other right-hand instruments already do. */
+  #hudPip { position: absolute; right: 18px; top: 152px; width: 260px; }
+  #ui:has(#tdiagPanel:not(.hidden)) #hudPip { right: calc(var(--diag-w) + 34px); }
+  /* Transparent: the picture is painted on the canvas BELOW this element, so
+     any background here would sit on top of it and wash it out. */
+  #hudPipFrame { height: 156px; border: 1px solid var(--line); }
+  #hudPipCap {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    padding: 3px 4px 0;
+    color: var(--dim);
+    text-transform: uppercase;
+  }
+  #hudPipAspect { color: var(--accent); font-weight: 700; }
+  #hudPipState.bad { color: var(--dead); font-weight: 700; }
+
   .dc-tree { overflow-y: auto; padding: 4px 0; flex: 1 1 auto; min-height: 90px; }
   .dc-tree::-webkit-scrollbar { width: 5px; }
   .dc-tree::-webkit-scrollbar-thumb { background: var(--line); }
@@ -365,6 +411,7 @@
       <div id="diagSub">—</div>
     </div>
     <canvas id="diagCutaway" class="dc-cutaway" width="330" height="190"></canvas>
+    <div id="diagHits" class="dc-hits"></div>
     <div id="diagTree" class="dc-tree"></div>
     <div id="diagCrew" class="dc-crew"></div>
   </div>
@@ -375,8 +422,16 @@
       <div id="tdiagSub">—</div>
     </div>
     <canvas id="tdiagCutaway" class="dc-cutaway" width="330" height="190"></canvas>
+    <div id="tdiagHits" class="dc-hits"></div>
     <div id="tdiagTree" class="dc-tree"></div>
     <div id="tdiagCrew" class="dc-crew"></div>
+  </div>
+
+  <!-- Target view. A transparent frame; the picture inside it is a second pass
+       of the real scene painted straight onto the main canvas underneath. -->
+  <div id="hudPip" class="hidden">
+    <div id="hudPipFrame"></div>
+    <div id="hudPipCap"><span id="hudPipAspect">—</span><span id="hudPipState"></span></div>
   </div>
 
   <div id="hudLeft" class="panel">
@@ -392,6 +447,10 @@
   <div id="hudRight" class="panel">
     <div class="gauge"><div class="label">Shield</div><div class="bar"><i id="hudShieldFill"></i></div></div>
     <div class="gauge"><div class="label">Hull</div><div class="bar"><i id="hudHullFill"></i></div></div>
+    <!-- Drives and the flight computer are what actually end a ship. They were
+         the only things NOT on the HUD, so the player watched four bars that
+         did not predict their own death. -->
+    <div class="gauge"><div class="label">Drives <span id="hudHelmTxt"></span></div><div class="bar"><i id="hudDriveFill"></i></div></div>
     <div class="gauge"><div class="label">Power</div><div class="bar"><i id="hudPowerFill"></i></div></div>
     <div class="gauge"><div class="label">Capacitor</div><div class="bar"><i id="hudCapFill"></i></div></div>
     <div class="gauge"><div class="label">Fuel</div><div class="bar"><i id="hudFuelFill"></i></div></div>

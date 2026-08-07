@@ -45,6 +45,8 @@ export class HUD {
       assist: document.getElementById('hudAssist'),
       shield: document.getElementById('hudShieldFill'),
       hull: document.getElementById('hudHullFill'),
+      drive: document.getElementById('hudDriveFill'),
+      helm: document.getElementById('hudHelmTxt'),
       power: document.getElementById('hudPowerFill'),
       cap: document.getElementById('hudCapFill'),
       fuel: document.getElementById('hudFuelFill'),
@@ -57,7 +59,20 @@ export class HUD {
       targetSub: document.getElementById('hudTargetSub'),
       targetBars: document.getElementById('hudTargetBars'),
       msg: document.getElementById('hudMessages'),
+      pip: document.getElementById('hudPip'),
+      pipFrame: document.getElementById('hudPipFrame'),
+      pipAspect: document.getElementById('hudPipAspect'),
+      pipState: document.getElementById('hudPipState'),
     };
+    /**
+     * Camera for the target view. Sits on your own line of sight to the target
+     * but at a fixed multiple of the target's radius, so the aspect you are
+     * actually attacking is preserved while apparent size is not: a picket at
+     * six kilometres and a dreadnought at eight hundred metres both fill the
+     * frame, and the only thing that changes between them is what you can see
+     * wrong with them.
+     */
+    this.pipCam = new THREE.PerspectiveCamera(38, 1.6, 1, 260000);
     this.resize();
   }
 
@@ -100,6 +115,8 @@ export class HUD {
       el.textContent = value;
     } else if (prop === 'html') {
       el.innerHTML = value;
+    } else if (prop === 'class') {
+      el.className = value;
     } else {
       el.style[prop] = value;
     }
@@ -151,6 +168,16 @@ export class HUD {
 
     this._set(this.el.shield, 'width', `${Math.round(sys.shieldFraction() * 100)}%`);
     this._set(this.el.hull, 'width', `${Math.round(sys.hullFraction() * 100)}%`);
+    // Drive authority and the flight computer, together, are the mission-kill
+    // condition. Shown as one gauge because they fail as a pair: either alone
+    // is survivable, both is adrift.
+    const drive = sys.driveAuthority();
+    this._set(this.el.drive, 'width', `${Math.round(drive * 100)}%`);
+    this._set(this.el.drive, 'background', drive < 0.15 ? '#ff6a3a' : '');
+    const helm = sys.flightComputer;
+    this._set(this.el.helm, 'text', ship.derelict ? 'ADRIFT' : (helm ? 'HELM' : 'NO HELM'));
+    this._set(this.el.helm, 'color',
+      ship.derelict ? '#ff6a5a' : (helm ? 'rgba(150,190,215,0.55)' : '#ffb04a'));
     const powerFrac = sys.demand > 0 ? clamp01(sys.supply / sys.demand) : 1;
     this._set(this.el.power, 'width', `${Math.round(powerFrac * 100)}%`);
     this._set(this.el.cap, 'width',
@@ -221,7 +248,7 @@ export class HUD {
           + `<em>SYSTEMS ${Math.round(t.sys.integrity * 100)}%</em></div>`
           + `<div class="tsmall">CREW ${Math.round(t.crew.complement * 100)}%`
           + `  ·  ${t.sys.fireCount() ? 'FIRE' : 'NO FIRE'}`
-          + `  ·  ${t.sys.driveAuthority() > 0.1 ? 'MOBILE' : 'ADRIFT'}</div>`
+          + `  ·  ${t.derelict ? 'DERELICT' : (t.sys.driveAuthority() > 0.1 ? 'MOBILE' : 'CRIPPLED')}</div>`
         : '<div class="tsmall">SCANNING…</div>';
       this._set(this.el.targetBars, 'html',
         `<div class="tbar sh"><i style="width:${shieldPct}%"></i><em>SHIELD ${shieldPct}%</em></div>`
@@ -242,6 +269,85 @@ export class HUD {
     this._set(this.el.msg, 'html', msgHtml);
 
     this._drawMarks();
+  }
+
+  /**
+   * Second render pass: the locked target, framed consistently, painted into
+   * the PiP rect on the main canvas.
+   *
+   * Called from the frame loop AFTER the main render, with the scissor test
+   * confining both the clear and the draw to the frame. It re-renders the real
+   * scene rather than a schematic, so everything the simulation is already
+   * doing to that hull — scorch, venting compartments, open fires, the shield
+   * lighting where it is being struck — shows up for free and stays true.
+   *
+   * Gated on sensors: no array, no picture. Blinding a ship should cost you the
+   * ability to watch what you are doing to it.
+   */
+  renderTargetView(renderer, scene) {
+    const game = this.game;
+    const el = this.el.pip;
+    if (!el) {
+      return;
+    }
+    const t = game.targeting.target;
+    const player = game.player;
+    const live = t && !t.disposed && player && !player.ship.disposed
+      && player.ship.sys.sensorQuality() > 0.05;
+    el.classList.toggle('hidden', !live);
+    if (!live) {
+      return;
+    }
+
+    const r = this.el.pipFrame.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) {
+      return;
+    }
+
+    // Look along the player's own bearing to the target, pulled back to a
+    // normalised standoff. A perspective camera fits a sphere of radius R at
+    // R / tan(fov/2); the extra margin keeps the hull off the frame edge.
+    _v.copy(t.position).sub(player.ship.position);
+    const range = _v.length();
+    if (range < 1e-3) {
+      return;
+    }
+    _v.multiplyScalar(1 / range);
+    const fit = t.hitRadius / Math.tan((this.pipCam.fov * Math.PI) / 360);
+    const cam = this.pipCam;
+    cam.position.copy(t.position).addScaledVector(_v, -fit * 1.22);
+    // Keep the frame's horizon aligned with the player's, so left in the PiP is
+    // left on screen and a rolling target reads as the target rolling.
+    cam.up.set(0, 1, 0).applyQuaternion(player.camera.quaternion);
+    cam.lookAt(t.position);
+    cam.aspect = r.width / r.height;
+    cam.near = Math.max(1, fit * 0.05);
+    cam.updateProjectionMatrix();
+
+    // Viewport origin is bottom-left and in CSS pixels; three.js applies the
+    // pixel ratio itself.
+    const x = r.left;
+    const y = window.innerHeight - r.bottom;
+    renderer.setScissorTest(true);
+    renderer.setViewport(x, y, r.width, r.height);
+    renderer.setScissor(x, y, r.width, r.height);
+    renderer.render(scene, cam);
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+
+    // Caption: which facet is turned toward you and what state it is in. That
+    // is the one thing the picture cannot show and the one thing that decides
+    // whether to keep shooting this side of the ship.
+    _v.copy(player.ship.position).sub(t.position).normalize();
+    const facet = t.faceFor(_v);
+    const f = t.sys.shield.facets[facet];
+    const pct = f && f.max > 0 ? Math.round(clamp01(f.charge / f.max) * 100) : 0;
+    this._set(this.el.pipAspect, 'text', `${facet} aspect`);
+    const down = f && f.down;
+    this._set(this.el.pipState, 'text',
+      t.derelict ? 'DERELICT'
+        : (down ? `FACET ${f.cause}` : `FACET ${pct}%`));
+    this._set(this.el.pipState, 'class', down || t.derelict ? 'bad' : '');
   }
 
   // -- canvas marks ----------------------------------------------------------
@@ -292,7 +398,11 @@ export class HUD {
     }
 
     // --- reticle -----------------------------------------------------------
-    const canFire = ship.fireGroups[0].some((m) => m.mod.eff > 0.12);
+    // Reticle health reflects the group bound to the left button, not the AI's
+    // fixed-mount group — otherwise it reports on guns the player is not firing.
+    const primary = ship.weaponGroups[player.primary];
+    const canFire = (primary ? primary.mounts : ship.fireGroups[0])
+      .some((m) => m.mod.eff > 0.12 && !m.mod.destroyed);
     ctx.strokeStyle = canFire ? 'rgba(190,225,245,0.85)' : 'rgba(255,110,90,0.85)';
     ctx.lineWidth = 1.4;
     ctx.beginPath();

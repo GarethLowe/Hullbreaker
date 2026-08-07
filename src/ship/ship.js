@@ -22,6 +22,9 @@ import { Systems } from './systems.js';
 import { Crew } from './crew.js';
 import { Body, Autopilot, FORWARD } from './flight.js';
 import { Decals } from '../fx/decals.js';
+import {
+  buildMount, mountFrame, mountStyle, partGeometry, shellGeometry, skinFraction,
+} from '../world/hardware.js';
 import { WEAPONS, MOUNTS, AMMO } from '../weapons/defs.js';
 import {
   rayBox, raySphere, rayEllipsoid, AXIS_KEY, clamp, clamp01, rand, interceptTime,
@@ -38,6 +41,50 @@ const _qi = new THREE.Quaternion();
 const _mp = new THREE.Vector3();
 const _mn = new THREE.Vector3();
 const _mq = new THREE.Quaternion();
+/** Scratch for the gunnery lay error; `_d` is live across that stretch. */
+const _lay = new THREE.Vector3();
+/** Muzzle solve. `_launch` is holding `_o` and `_v2` when this runs. */
+const _mz = new THREE.Vector3();
+const _mzUp = new THREE.Vector3();
+const _mzR = new THREE.Vector3();
+const _mzU = new THREE.Vector3();
+
+/**
+ * How far a gun rides back on its slide when it fires, as a fraction of the
+ * mount's scale, and how fast it returns. Recoil is the cheapest thing that
+ * makes a battery look mechanical rather than animated — the eye reads the
+ * hesitation between the flash and the gun coming back up.
+ */
+const RECOIL_TRAVEL = 0.55;
+const RECOIL_RETURN = 5.5;
+
+/**
+ * Radians a mount may point below the face it is bolted to. About five degrees,
+ * which is roughly what a real barbette allows before the breech fouls its own
+ * ring — the gun is a machine standing on a deck, not a vector with permission.
+ *
+ * Until this existed `arc` was a symmetric cone about the rest bearing and
+ * nothing knew the deck was there, so every mount aboard could swing its barrel
+ * down through its own plating: the broadsides to 26 degrees below their ring
+ * and the point defence to 42. The barrel visibly passed through the hull, and
+ * the shot came with it.
+ *
+ * This is applied AFTER the traverse arc rather than before it, and that order
+ * is deliberate: the arc is an authored limit and this is a physical one, so
+ * when the two disagree the metal wins.
+ */
+export const MOUNT_DEPRESSION = 0.09;
+/** Scratch for that clamp; `_aimMount` is holding most of the others. */
+const _mnt = new THREE.Vector3();
+const _mntT = new THREE.Vector3();
+
+/**
+ * Radians a gun is mis-laid by when its station is completely unmanned. About
+ * 1.7 degrees, which is a clean miss on a cruiser past two kilometres and a
+ * degraded but real threat inside that — a gutted ship should shoot badly, not
+ * be disarmed outright.
+ */
+const MAX_LAY_ERROR = 0.024;
 
 /**
  * Facet lookup by dominant local axis, in +X/-X/+Y/-Y/+Z/-Z order.
@@ -48,6 +95,17 @@ const _mq = new THREE.Quaternion();
 const FACET_BY_AXIS = [['port', 'stbd'], ['dorsal', 'ventral'], ['fore', 'aft']];
 
 let SHIP_SERIAL = 0;
+
+/**
+ * How many penetration traces a hull remembers, and how long one stays on the
+ * cutaway. `XRAY_DRAW` is the travel time of the replay — the round is drawn
+ * walking through the ship rather than appearing whole, because seeing WHERE
+ * it went is the entire point and a static line does not show direction.
+ */
+const XRAY_MAX = 16;
+export const XRAY_DRAW = 0.22;
+export const XRAY_HOLD = 2.6;
+export const XRAY_FADE = 6.5;
 
 export class Ship {
   constructor(game, hullId, opts = {}) {
@@ -60,6 +118,19 @@ export class Ship {
     this.disposed = false;
     this.dead = false;
     this.deadT = 0;
+    /**
+     * Recent penetration traces, for the cutaway. Each is one round's walk
+     * through this hull in HULL-TABLE coordinates, so the cutaway can draw it
+     * over the same boxes the solver tested against without transforming
+     * anything. Only recorded for ships a diagnostic panel is actually
+     * showing — see `Ballistics._tracing`.
+     */
+    this.xray = [];
+    /** Mission-killed: adrift, still intact, still possibly shooting. */
+    this.derelict = false;
+    this.derelictT = 0;
+    /** Kill already credited, so a hulk cannot be scored twice. */
+    this.scored = false;
     this.lastDamageT = -1e9;
     /** Delta-v taken from impacts since the camera last looked; see consumeJolt. */
     this.jolt = 0;
@@ -99,12 +170,25 @@ export class Ship {
   _buildMesh(tintOverride) {
     const assets = this.game.assets;
     const tint = tintOverride !== undefined ? tintOverride : this.hull.tint;
+    this.tint = tint;
+    /**
+     * How big this ship's guns are, relative to the kit's `medium` fitting.
+     *
+     * A dreadnought's main battery is genuinely a bigger machine than a
+     * picket's, not the same turret at the same size, so hardware scales with
+     * the hull it is bolted to as well as with the MOUNTS class. Clamped at
+     * both ends: unclamped, the SABRE wears jewellery and the BASTION wears
+     * buildings. This is the knob to turn if the guns read wrong in flight.
+     */
+    this.gunScale = clamp(this.hull.radius / 60, 0.85, 3.0);
     this.group = new THREE.Group();
     this.sectionMeshes = new Map();
 
     for (const s of this.hull.sections) {
-      const mat = assets.hullMaterial(tint, s.style);
-      const geo = assets.boxGeo;
+      // The armour is armour even on the bridge: the transmissive material is
+      // for the window band, which is its own part inside the shell.
+      const mat = assets.hullMaterial(tint, s.style === 'canopy' ? 'hull' : s.style);
+      const geo = shellGeometry(s.style);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.scale.set(s.half[0] * 2, s.half[1] * 2, s.half[2] * 2);
       // Positions are relative to the derived centre of mass, so the model and
@@ -120,24 +204,16 @@ export class Ship {
       this.group.add(mesh);
       this.sectionMeshes.set(s.id, mesh);
 
-      // A little surface relief so a hull is not six flat quads. Purely
-      // cosmetic and never tested against.
-      if (s.style === 'hull' || s.style === 'engine') {
-        for (let i = 0; i < 3; i++) {
-          const g = new THREE.Mesh(assets.boxGeo, assets.greebleMaterial(tint));
-          const ax = Math.random() < 0.5 ? 0 : 1;
-          g.scale.set(
-            s.half[0] * rand(0.25, 0.7) * 2,
-            s.half[1] * rand(0.08, 0.2) * 2,
-            s.half[2] * rand(0.2, 0.55) * 2,
-          );
-          g.position.set(
-            mesh.position.x + (ax ? s.half[0] * rand(-0.6, 0.6) : 0),
-            mesh.position.y + s.half[1] * (Math.random() < 0.5 ? 1 : -1) * 0.99,
-            mesh.position.z + s.half[2] * rand(-0.5, 0.5),
-          );
-          this.group.add(g);
-        }
+      // Three randomly-placed boxes per compartment used to stand in for
+      // surface relief. The shells carry their own ribs, strakes and radiator
+      // banks now, modelled to the compartment rather than scattered over it,
+      // so the greebles are gone: they were noise on top of detail.
+      if (s.style === 'canopy') {
+        const glass = new THREE.Mesh(
+          partGeometry('shell_canopy_glass'), assets.hullMaterial(tint, 'canopy'));
+        // A child, so it inherits the compartment's non-uniform scale and stays
+        // welded into the window aperture whatever shape the bridge is.
+        mesh.add(glass);
       }
     }
 
@@ -159,9 +235,20 @@ export class Ship {
       this.driveGlows.push({ sprite, id: def.id, base: this.hull.radius * 0.30 });
     }
 
-    // Navigation strobes, so contacts read at range even against the dust.
-    this.beacon = new THREE.PointLight(tint, 0, this.hull.radius * 9, 2);
+    // Navigation strobe, so contacts read at range even against the dust.
+    //
+    // A billboard rather than a PointLight, and not as a shortcut: three.js
+    // bakes the number of visible lights into every shader program's cache key,
+    // so one light per ship meant every arriving hull changed the light count
+    // and silently recompiled every material in the scene. A four-ship wave did
+    // it four times, mid-fight. It was also the wrong tool — a real light at the
+    // centre of a sealed hull mostly illuminates that hull's own plating, while
+    // what this is actually for is being SEEN from four kilometres away, which
+    // is a job for something that emits rather than something that lights.
+    this.beacon = new THREE.Sprite(this.game.assets.driveMaterial(tint));
+    this.beacon.material.color.set(tint);
     this.beacon.position.set(0, 0, 0);
+    this.beacon.scale.setScalar(this.hull.radius * 0.5);
     this.group.add(this.beacon);
 
     this.decals = new Decals(this.group);
@@ -181,7 +268,7 @@ export class Ship {
    */
   _buildShieldBubble() {
     const r = this.hull.shield.radii;
-    const geo = new THREE.SphereGeometry(1, 32, 24);
+    const geo = this.game.assets.shieldGeo;
     this._shieldHits = [];
     for (let i = 0; i < 8; i++) {
       this._shieldHits.push(new THREE.Vector4(0, 0, 1, 0));
@@ -307,9 +394,48 @@ export class Ship {
         firing: false,
         beamT: 0,
         scale: MOUNTS[def.mount] || 1,
-        /** Turrets traverse; a fixed mount is a mount with an arc of nearly 0. */
+        /**
+         * Two different questions, and conflating them cost the player half
+         * the arsenal.
+         *
+         * `turret` is the AI's question — "does this gun point itself, or do I
+         * have to point the ship at something?" — and it decides which trigger
+         * group the mount lands in.
+         *
+         * `traverses` is the gunnery question: can this mount slew at all? Any
+         * mount with a real arc can, and `_aimMount` already contains correct
+         * code to clamp a demand into that arc. Gating that code on `turret`
+         * meant a mount with a 6.9-degree traverse was flown as though it were
+         * welded down — so the MERIDIAN's lances, ion projector and torpedo
+         * tubes fired along their authored bearing, 2 to 6 degrees off the
+         * reticle, and missed everything at every range.
+         */
         turret: def.arc > 0.25,
+        traverses: def.arc > 0.02,
+        /** Decorrelates lay error across a broadside. */
+        phase: this.mounts.length * 2.39,
+        /** Recoil state, 1 at the instant of firing. */
+        kick: 0,
+        /** Which barrel fires next, for multi-barrel mounts. */
+        barrel: 0,
       };
+
+      // The physical fitting. `origin` is where the hull tables put the gun,
+      // which is a point inside the compartment; the hardware has to stand on
+      // the plating, so it is pushed out to the skin of the face it is bolted
+      // to and the muzzle is measured from there.
+      const style = mountStyle(w, def.arc);
+      const frame = mountFrame(def.pos, s.half, def.dir, s.style);
+      const rig = buildMount(
+        this.game.assets, this.tint, w, style, mount.scale * this.gunScale);
+      mount.up = frame.up;
+      mount.invQuat = frame.quat.clone().invert();
+      mount.surface = mount.origin.clone().addScaledVector(frame.up, frame.lift);
+      rig.root.position.copy(mount.surface);
+      rig.root.quaternion.copy(frame.quat);
+      mount.rig = rig;
+      this.group.add(rig.root);
+
       this.mounts.push(mount);
     }
     // The AI thinks in terms of "guns I have to point the ship at" versus
@@ -336,6 +462,36 @@ export class Ship {
 
   localToWorld(local, out = new THREE.Vector3()) {
     return out.copy(local).applyQuaternion(this.body.quat).add(this.body.pos);
+  }
+
+  /**
+   * World point into RAW hull-table coordinates — the frame the tables are
+   * authored in and the frame the cutaway draws in, which is the body frame
+   * shifted back by the centre of mass. Meshes are placed COM-relative so the
+   * model pivots where the physics does, so this is the inverse of that plus
+   * the shift back.
+   */
+  worldToHull(world, out = new THREE.Vector3()) {
+    out.copy(world).sub(this.body.pos).applyQuaternion(_qi.copy(this.body.quat).invert());
+    out.x += this.hull.com[0];
+    out.y += this.hull.com[1];
+    out.z += this.hull.com[2];
+    return out;
+  }
+
+  /**
+   * Opens a penetration trace and hands it back for the solver to append to as
+   * the round walks through. Registered immediately rather than committed at
+   * the end, because the walk has a dozen early returns — a round that stops in
+   * the first bulkhead should still leave the mark that says so.
+   */
+  beginXray() {
+    const path = { age: 0, nodes: [] };
+    this.xray.push(path);
+    if (this.xray.length > XRAY_MAX) {
+      this.xray.shift();
+    }
+    return path;
   }
 
   /** Velocity of a point on the hull, including the spin. Guns inherit it. */
@@ -506,6 +662,15 @@ export class Ship {
    * Which shield facet faces `worldDir` (a direction pointing AT the ship from
    * the threat). Used by blasts, which arrive from a bearing rather than along
    * a ray that can be tested against the bubble.
+   *
+   * Reads FACET_BY_AXIS, the same table the ray path uses. It used to open-code
+   * a second copy of the sign convention and got the X pair backwards — +X is
+   * PORT, and this returned 'stbd' for it. The two paths then disagreed about
+   * the same bearing: a warhead off the port beam drained the STARBOARD facet
+   * and left the one that actually took it at full charge, while a ray strike
+   * from that identical bearing charged port correctly. One table, one answer,
+   * and the disagreement is now structurally impossible rather than merely
+   * fixed.
    */
   faceFor(worldDir) {
     _v.copy(worldDir).applyQuaternion(_qi.copy(this.body.quat).invert());
@@ -513,13 +678,16 @@ export class Ship {
     const x = Math.abs(_v.x / r[0]);
     const y = Math.abs(_v.y / r[1]);
     const z = Math.abs(_v.z / r[2]);
+    let axis = 0;
+    let val = _v.x;
     if (y > x && y > z) {
-      return _v.y >= 0 ? 'dorsal' : 'ventral';
+      axis = 1;
+      val = _v.y;
+    } else if (z > x) {
+      axis = 2;
+      val = _v.z;
     }
-    if (z > x) {
-      return _v.z >= 0 ? 'fore' : 'aft';
-    }
-    return _v.x >= 0 ? 'stbd' : 'port';
+    return FACET_BY_AXIS[axis][val >= 0 ? 0 : 1];
   }
 
   /**
@@ -570,7 +738,55 @@ export class Ship {
     _mq.copy(this.body.quat).invert();
     _mp.copy(worldPoint).sub(this.body.pos).applyQuaternion(_mq);
     _mn.copy(worldNormal).applyQuaternion(_mq);
+    this._seatOnSkin(_mp, _mn);
     this.decals.add(_mp, _mn, opts);
+  }
+
+  /**
+   * Slide a hit from the compartment box onto the plating you can actually see.
+   *
+   * The ray was tested against the box, because the box is what the damage
+   * model is made of. The shell is inscribed in that box and tapers, so the two
+   * disagree by the better part of a metre down the flanks and by several at a
+   * bow — and a scorch mark left at the box face hovers off the hull, which is
+   * exactly the sort of thing that reads as broken from the cockpit.
+   *
+   * Only the lateral faces need it; the fore and aft faces are not tapered.
+   */
+  _seatOnSkin(p, n) {
+    let axis = 0;
+    let mag = Math.abs(n.x);
+    if (Math.abs(n.y) > mag) {
+      axis = 1;
+      mag = Math.abs(n.y);
+    }
+    if (Math.abs(n.z) > mag) {
+      return;
+    }
+    const com = this.hull.com;
+    let best = null;
+    let bestGap = Infinity;
+    for (const s of this.hull.sections) {
+      // Chebyshev distance to the box: 0 or less means inside it.
+      const gap = Math.max(
+        Math.abs(p.x - (s.pos[0] - com[0])) - s.half[0],
+        Math.abs(p.y - (s.pos[1] - com[1])) - s.half[1],
+        Math.abs(p.z - (s.pos[2] - com[2])) - s.half[2],
+      );
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = s;
+      }
+    }
+    if (!best || bestGap > 1.5) {
+      return;
+    }
+    const centre = best.pos[axis] - com[axis];
+    const off = p.getComponent(axis) - centre;
+    const sign = Math.sign(off || 1);
+    const f = skinFraction(
+      best.style, axis, sign, p.z - (best.pos[2] - com[2]), best.half[2]);
+    p.setComponent(axis, centre + sign * best.half[axis] * f);
   }
 
   /** Darkens a compartment's plating where it has been hit. */
@@ -595,8 +811,9 @@ export class Ship {
    */
   _aimMount(mount, target, dt) {
     const rest = _v.copy(mount.rest).applyQuaternion(this.body.quat);
-    if (!target || !mount.turret || !this.sys.hasData(mount.mod)) {
+    if (!target || !mount.traverses || !this.sys.hasData(mount.mod)) {
       mount.aim.lerp(rest, 1 - Math.exp(-6 * dt)).normalize();
+      this._clampToMount(mount);
       return;
     }
     this.localToWorld(mount.origin, _o);
@@ -610,6 +827,34 @@ export class Ship {
       }
     }
     _v2.normalize();
+
+    // Lay error. The gun is only as good as the people laying it, and until now
+    // it was not: the hull tables, the README and the crew model all say an
+    // empty gunnery station costs turret quality, but the aiming code read
+    // nothing but module health, so a ship whose gunners were all dead shot
+    // exactly as well as one with a full complement.
+    //
+    // This is the loop that was missing from the fight. Enemy fire is relentless
+    // because nothing the player does to a hull makes it shoot worse — killing
+    // its crew, venting its gunnery decks and cutting its fire-control all left
+    // the incoming stream untouched. Now they degrade it, which is both the
+    // documented behaviour and the thing that makes a long engagement wind down
+    // instead of grinding on at full intensity to the last second.
+    const hands = this.crew ? this.crew.station('gunner') : 1;
+    if (hands < 0.995) {
+      // A slow wander rather than jitter: a mis-laid gun is consistently off,
+      // and drifts as the crew re-lay it. Phase is per-mount so a broadside
+      // does not err in unison.
+      // Superlinear: a battery that has taken a few casualties shoots very
+      // nearly as well, and one that has been gutted shoots badly. A straight
+      // proportion made losing half a gun crew almost disarm a ship, which
+      // turned every fight into a race to kill gunners.
+      const slop = MAX_LAY_ERROR * (1 - hands) ** 1.6;
+      const ph = performance.now() * 4e-4 + mount.phase;
+      _lay.set(Math.sin(ph), Math.cos(ph * 1.31), 0).applyQuaternion(this.body.quat);
+      _v2.addScaledVector(_lay, Math.sin(ph * 0.67) * slop).normalize();
+    }
+
     // Clamp the demand into the mount's traverse arc about its rest bearing.
     const dot = clamp(_v2.dot(rest), -1, 1);
     const arc = mount.def.arc;
@@ -618,9 +863,72 @@ export class Ship {
       _d.copy(_v2).addScaledVector(rest, -dot).normalize();
       _v2.copy(rest).multiplyScalar(Math.cos(arc)).addScaledVector(_d, Math.sin(arc));
     }
-    // Traverse is not instant, and a damaged mount slews slower.
-    const rate = 2.6 * (0.35 + 0.65 * mount.mod.eff);
+    // Traverse is not instant. A damaged mount slews slower, and so does one
+    // being cranked round by half a gun crew.
+    const rate = 2.6 * (0.35 + 0.65 * mount.mod.eff) * (0.4 + 0.6 * hands);
     mount.aim.lerp(_v2, 1 - Math.exp(-rate * dt)).normalize();
+    this._clampToMount(mount);
+  }
+
+  /**
+   * Hold a mount above the plating it is bolted to. See `MOUNT_DEPRESSION`.
+   *
+   * Applied to `aim` after the slew rather than to the demand before it, so the
+   * invariant holds every frame and not merely at the ends of the motion —
+   * normalising the interpolation between two legal bearings can dip a couple of
+   * degrees below both of them, which is exactly long enough to see.
+   */
+  _clampToMount(mount) {
+    if (!mount.up) {
+      return;
+    }
+    _mnt.copy(mount.up).applyQuaternion(this.body.quat);
+    const floor = -Math.sin(MOUNT_DEPRESSION);
+    const elev = mount.aim.dot(_mnt);
+    if (elev >= floor) {
+      return;
+    }
+    // Lift the bearing onto the lowest cone the mount can make, keeping its
+    // train: the gun stops at the deck rather than being swung off the target.
+    // Cannot degenerate: the deepest mount in the roster bottoms out at -30
+    // degrees (rest elevation minus arc), nowhere near straight down the axis.
+    _mntT.copy(mount.aim).addScaledVector(_mnt, -elev).normalize();
+    mount.aim.copy(_mnt).multiplyScalar(floor)
+      .addScaledVector(_mntT, Math.sqrt(1 - floor * floor)).normalize();
+  }
+
+  /**
+   * Where the round actually leaves the ship: the tip of the barrel that is
+   * about to fire, not the middle of the compartment behind it.
+   *
+   * Solved from `mount.aim` rather than read off the rig's world matrix, and
+   * that is deliberate. The rig is posed in `_syncVisual`, which runs after
+   * gunnery, so reading its matrix would fire from where the gun was pointing
+   * last frame and would put the very first shot of a ship's life at the world
+   * origin. The barrel is welded to `aim` by construction, so composing the
+   * same vector gives the same answer a frame earlier and cannot desync.
+   */
+  _muzzleWorld(mount, out) {
+    const rig = mount.rig;
+    if (!rig) {
+      return this.localToWorld(mount.origin, out);
+    }
+    const s = mount.scale * this.gunScale;
+    const m = rig.muzzles[mount.barrel % rig.muzzles.length];
+    // The trunnion, in world: out to the plating, then up to the pivot.
+    this.localToWorld(_mz.copy(mount.surface).addScaledVector(mount.up, rig.pivot * s), out);
+    // A frame about the bore, to place a barrel that is not on the axis.
+    _mzUp.copy(mount.up).applyQuaternion(this.body.quat);
+    _mzR.copy(_mzUp).cross(mount.aim);
+    if (_mzR.lengthSq() < 1e-8) {
+      _mzR.set(1, 0, 0).cross(mount.aim);
+    }
+    _mzR.normalize();
+    _mzU.copy(mount.aim).cross(_mzR);
+    return out
+      .addScaledVector(mount.aim, m[2] * s)
+      .addScaledVector(_mzR, m[0] * s)
+      .addScaledVector(_mzU, m[1] * s);
   }
 
   /** True if this mount is pointing close enough to be worth firing. */
@@ -666,7 +974,7 @@ export class Ship {
           mount.firing = want;
           if (want) {
             mod.duty = 1;
-            this.localToWorld(mount.origin, _o);
+            this._muzzleWorld(mount, _o);
             ball.fireBeam(this, mount, _o, mount.aim, dt);
             this.sys.capStore = Math.max(0, this.sys.capStore - w.draw * dt);
             mod.heatAcc += w.heat * mount.scale;
@@ -714,7 +1022,11 @@ export class Ship {
 
   _launch(mount, target) {
     const w = mount.weapon;
-    this.localToWorld(mount.origin, _o);
+    this._muzzleWorld(mount, _o);
+    // Multi-barrel mounts alternate, so a repeater's two tubes and a torpedo
+    // battery's four tubes each fire in turn instead of all from one hole.
+    mount.barrel++;
+    mount.kick = 1;
     // Guns inherit the ship's motion, including the part contributed by spin.
     this.pointVelocity(mount.origin, _v2);
     // Only magazine-fed guns have a choice of round; a laser fires light.
@@ -736,6 +1048,12 @@ export class Ship {
   // -- per-tick --------------------------------------------------------------
 
   update(dt) {
+    for (let i = this.xray.length - 1; i >= 0; i--) {
+      this.xray[i].age += dt;
+      if (this.xray[i].age > XRAY_FADE) {
+        this.xray.splice(i, 1);
+      }
+    }
     this.sys.tick(dt);
     this.crew.tick(dt);
     this._drainSystemEvents();
@@ -825,9 +1143,50 @@ export class Ship {
     ).applyQuaternion(this.body.quat).add(this.body.pos);
   }
 
+  /**
+   * Pose every mount. The gunnery model has already decided where each gun
+   * points; this only decomposes that one world vector into the two angles the
+   * machine can actually make — train about the hull normal, elevate about the
+   * trunnions — so the barrel you can see is the barrel the solver is using.
+   */
+  _syncMounts(dt) {
+    _qi.copy(this.body.quat).invert();
+    for (const mount of this.mounts) {
+      const rig = mount.rig;
+      if (!rig) {
+        continue;
+      }
+      const mod = mount.mod;
+      const dead = !mod || mod.destroyed;
+      if (rig.slews) {
+        if (dead) {
+          // A wrecked mount stops training and the barrel drops. It is the
+          // clearest read there is that a battery is off the board, and it is
+          // visible from further out than any damage decal.
+          rig.pitch.rotation.x += (0.42 - rig.pitch.rotation.x) * (1 - Math.exp(-2 * dt));
+        } else {
+          // Into the mount's own frame: out of world, into the body, into the
+          // base plate. What is left is train and elevation.
+          _v.copy(mount.aim).applyQuaternion(_qi).applyQuaternion(mount.invQuat);
+          rig.yaw.rotation.y = Math.atan2(_v.x, _v.z);
+          rig.pitch.rotation.x = Math.atan2(-_v.y, Math.hypot(_v.x, _v.z));
+        }
+      }
+      mount.kick = Math.max(0, mount.kick - dt * RECOIL_RETURN);
+      rig.gun.position.z = -mount.kick * RECOIL_TRAVEL;
+      if (rig.glow) {
+        const live = dead ? 0 : mod.eff;
+        // Idles warm when the mount has power, goes white on the shot.
+        rig.glow.material.emissiveIntensity =
+          live * (0.35 + 4.0 * (mount.firing ? 1 : mount.kick));
+      }
+    }
+  }
+
   _syncVisual(dt) {
     this.group.position.copy(this.body.pos);
     this.group.quaternion.copy(this.body.quat);
+    this._syncMounts(dt);
 
     const duty = clamp01(Math.abs(this.autopilot.cmd.throttle))
       * (this.autopilot.boostT > 0 ? 1.7 : 1);
@@ -839,9 +1198,12 @@ export class Ship {
       g.sprite.material.opacity = 0.25 + 0.75 * clamp01(duty) * live;
       g.sprite.visible = live > 0.02;
     }
-    this.beacon.intensity = this.sys.supply > 0.2
-      ? 1.6 + Math.sin(performance.now() * 0.004 + this.id) * 1.2
+    // Strobe: pulses while the ship has power, dark when the lights go out.
+    const lit = this.sys.supply > 0.2
+      ? clamp01(0.45 + Math.sin(performance.now() * 0.004 + this.id) * 0.4)
       : 0;
+    this.beacon.material.opacity = lit * 0.7;
+    this.beacon.visible = lit > 0.02;
 
     // Shield bubble: impact flares decay, and the whole field brightens with
     // how much charge is up and reddens with how saturated the emitters are.

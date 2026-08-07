@@ -27,6 +27,10 @@
 // endpoint and declared dependency exists — a typo in this file is a thrown
 // error at load, not a silent dead network at minute nine of a fight.
 // -----------------------------------------------------------------------------
+// The one thing the tables reach outward for: where a compartment's plating
+// actually is, so a module can be seated inside the shell rather than merely
+// inside the box. See `seatModules`.
+import { skinFraction } from '../world/hardware.js';
 
 /**
  * Material response used by the penetration solver (joules absorbed / metre).
@@ -223,7 +227,9 @@ const SABRE = {
     + 'so every hit that lands lands somewhere that matters. It survives by '
     + 'choosing the range, and by not being where the return fire is.',
   tint: 0x8fd8ff,
-  shield: { capacity: 2.4e7, regen: 5.5e5, radii: [12, 9, 34] },
+  // `radii` are derived from the compartment boxes in compile(); only the
+  // energy budget is authored.
+  shield: { capacity: 2.4e7, regen: 5.5e5 },
   flight: {
     maxSpeed: 150, boostSpeed: 230, accelTime: 9, boostAccelTime: 6.5,
     pitchRate: 0.28, yawRate: 0.23, rollRate: 0.44, spool: 1.1,
@@ -231,7 +237,7 @@ const SABRE = {
   sections: [
     sec('prow', 'PROW', [0, 0, 38.75], [6.0, 5.0, 8.75], {
       armor: 'armorMedium', wall: 0.16, plateHp: 5.0e6, frameHp: 7.0e6,
-      density: 210, adj: ['bridge', 'fwdhold'],
+      density: 210, adj: ['bridge', 'fwdhold'], style: 'prow',
     }),
     sec('bridge', 'BRIDGE', [0, 4.5, 22], [5.0, 3.5, 8.0], {
       armor: 'armorMedium', wall: 0.14, plateHp: 4.2e6, frameHp: 6.0e6,
@@ -277,10 +283,10 @@ const SABRE = {
     cond('c_main_fwd', 'power', 'p.main', 'p.fwd', 'spine', [0, 4.2, 5], {
       label: 'FORWARD TRUNK', hp: 1.6e6,
     }),
-    cond('c_main_podL', 'power', 'p.main', 'p.podL', 'podL', [2.4, 0, 3], {
+    cond('c_main_podL', 'power', 'p.main', 'p.podL', 'podL', [2.0, 0, 3], {
       label: 'PORT POD FEED', hp: 1.1e6,
     }),
-    cond('c_main_podR', 'power', 'p.main', 'p.podR', 'podR', [-2.4, 0, 3], {
+    cond('c_main_podR', 'power', 'p.main', 'p.podR', 'podR', [-2.0, 0, 3], {
       label: 'STBD POD FEED', hp: 1.1e6,
     }),
 
@@ -289,8 +295,8 @@ const SABRE = {
       needs: { power: 'p.fwd', coolant: 'l.core' }, draw: 9, priority: 9,
       heat: 70, critical: true,
     }),
-    mod('sensor', 'sensor', 'SENSOR ARRAY', 'prow', [0, 1.5, 4.5], {
-      half: [3.4, 1.6, 2.2], hp: 4.5e6, vuln: 1.8, sys: 'COMPUTE',
+    mod('sensor', 'sensor', 'SENSOR ARRAY', 'prow', [0, 1.4, 2.6], {
+      half: [2.4, 1.5, 4.2], hp: 4.5e6, vuln: 1.8, sys: 'COMPUTE',
       needs: { power: 'p.fwd', data: 'd.main' }, draw: 7, priority: 7, heat: 24,
     }),
     cond('c_data_main', 'data', 'src.computer', 'd.main', 'bridge', [2.4, -1.6, 2], {
@@ -299,7 +305,7 @@ const SABRE = {
     cond('c_data_helm', 'data', 'src.computer', 'd.helm', 'bridge', [-2.4, -1.6, 2], {
       label: 'HELM BUS', hp: 1.0e6, vuln: 2.6, critical: true,
     }),
-    cond('c_data_fire', 'data', 'd.main', 'd.fire', 'spine', [0, 4.6, -4], {
+    cond('c_data_fire', 'data', 'd.main', 'd.fire', 'spine', [0, 4.2, -4], {
       label: 'FIRE CONTROL BUS', hp: 1.0e6, vuln: 2.6,
     }),
     cond('c_data_eng', 'data', 'd.main', 'd.eng', 'engineering', [-4.0, 3.6, 4], {
@@ -317,13 +323,13 @@ const SABRE = {
       fuelSection: 'spine', fuelPos: [0, 0.5, -5], fuelHalf: [3.6, 2.6, 3.4],
       fuelHp: 6.5e6, leak: 0.12,
     }),
-    mod('rcs_fwd', 'rcs', 'BOW RCS BLOCK', 'prow', [0, -2.4, -4], {
-      r: 2.2, hp: 4.5e6, sys: 'PROPULSION',
+    mod('rcs_fwd', 'rcs', 'BOW RCS BLOCK', 'prow', [0, -1.8, -4], {
+      r: 1.7, hp: 4.5e6, sys: 'PROPULSION',
       needs: { power: 'p.fwd' }, draw: 5, priority: 8,
       extra: { axes: [1, 1, 0.15], lat: [1, 1, 0] },
     }),
-    mod('rcs_aft', 'rcs', 'AFT RCS BLOCK', 'engineering', [0, 4.2, -6], {
-      r: 2.2, hp: 4.5e6, sys: 'PROPULSION',
+    mod('rcs_aft', 'rcs', 'AFT RCS BLOCK', 'engineering', [0, 3.5, -6], {
+      r: 1.9, hp: 4.5e6, sys: 'PROPULSION',
       needs: { power: 'p.main' }, draw: 5, priority: 8,
       extra: { axes: [1, 1, 1], lat: [1, 1, 1] },
     }),
@@ -332,12 +338,12 @@ const SABRE = {
       r: 1.8, hp: 5.0e6, sys: 'THERMAL',
       needs: { power: 'p.main' }, draw: 4, priority: 7,
     }),
-    mod('rad_L', 'radiator', 'PORT RADIATOR', 'podL', [-1.0, 1.2, 0], {
-      half: [3.2, 0.4, 6.5], hp: 3.0e6, vuln: 1.6, sys: 'THERMAL',
+    mod('rad_L', 'radiator', 'PORT RADIATOR', 'podL', [-0.8, 0.9, -1.0], {
+      half: [2.6, 0.35, 5.0], hp: 3.0e6, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.5 },
     }),
-    mod('rad_R', 'radiator', 'STBD RADIATOR', 'podR', [1.0, 1.2, 0], {
-      half: [3.2, 0.4, 6.5], hp: 3.0e6, vuln: 1.6, sys: 'THERMAL',
+    mod('rad_R', 'radiator', 'STBD RADIATOR', 'podR', [0.8, 0.9, -1.0], {
+      half: [2.6, 0.35, 5.0], hp: 3.0e6, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.5 },
     }),
     cond('l_core', 'coolant', 'src.pump', 'l.core', 'engineering', [-4.2, -3.2, 5], {
@@ -346,7 +352,7 @@ const SABRE = {
     cond('l_aft', 'coolant', 'l.core', 'l.aft', 'drivebay', [0, -3.6, 4], {
       label: 'DRIVE LOOP', hp: 1.2e6, leak: 0.16,
     }),
-    cond('l_pod', 'coolant', 'l.core', 'l.pod', 'spine', [0, -4.6, -3], {
+    cond('l_pod', 'coolant', 'l.core', 'l.pod', 'spine', [0, -4.2, -3], {
       label: 'POD LOOP', hp: 1.2e6, leak: 0.14,
     }),
 
@@ -365,20 +371,20 @@ const SABRE = {
 
     ...battery('fwd', 'prow', {
       label: 'PROW DRIVER', weapon: 'railgun', mount: 'medium',
-      magPos: [0, -1.6, 0], magHalf: [2.6, 1.6, 3.0], magHp: 5.0e6,
+      magPos: [0, -1.2, -1.0], magHalf: [2.4, 1.4, 3.0], magHp: 5.0e6,
       rounds: 320, cookoff: 4.5e7,
       hoistPos: [2.6, -0.4, -2], hoistHp: 1.1e6,
       gunPos: [0, 2.4, 7], gunHp: 8.0e6,
-      from: 'p.fwd', data: 'd.fire', dir: [0, 0, 1], arc: 0.10,
+      from: 'p.fwd', data: 'd.fire', dir: [0, 0, 1], arc: 0.16,
       draw: 9, heat: 120,
     }),
     hp_('hp_podL', 'PORT LASER', 'podL', [-1.6, 0, 7.5], {
-      weapon: 'beam', mount: 'medium', dir: [0, 0, 1], arc: 0.08,
+      weapon: 'beam', mount: 'medium', dir: [0, 0, 1], arc: 0.14,
       needs: { power: 'p.podL', data: 'd.fire', coolant: 'l.pod' },
       draw: 12, heat: 210, hp: 7.0e6,
     }),
     hp_('hp_podR', 'STBD LASER', 'podR', [1.6, 0, 7.5], {
-      weapon: 'beam', mount: 'medium', dir: [0, 0, 1], arc: 0.08,
+      weapon: 'beam', mount: 'medium', dir: [0, 0, 1], arc: 0.14,
       needs: { power: 'p.podR', data: 'd.fire', coolant: 'l.pod' },
       draw: 12, heat: 210, hp: 7.0e6,
     }),
@@ -408,7 +414,7 @@ const HALBERD = {
     + 'Built so one good hit degrades it rather than ending it — the failure '
     + 'modes are partial, which is what makes the schematic worth reading.',
   tint: 0xc8d4dc,
-  shield: { capacity: 7.5e7, regen: 1.3e6, radii: [20, 15, 58] },
+  shield: { capacity: 7.5e7, regen: 1.3e6 },
   flight: {
     maxSpeed: 115, boostSpeed: 175, accelTime: 13, boostAccelTime: 9,
     pitchRate: 0.200, yawRate: 0.165, rollRate: 0.32, spool: 1.5,
@@ -416,7 +422,7 @@ const HALBERD = {
   sections: [
     sec('prow', 'PROW', [0, 0, 69.25], [9.0, 7.5, 13.25], {
       armor: 'armorHeavy', wall: 0.30, plateHp: 1.4e7, frameHp: 2.0e7,
-      density: 240, adj: ['fwdbattery'],
+      density: 240, adj: ['fwdbattery'], style: 'prow',
     }),
     sec('fwdbattery', 'FORWARD BATTERY', [0, 0, 45], [9.5, 8.0, 11.0], {
       armor: 'armorHeavy', wall: 0.28, plateHp: 1.3e7, frameHp: 1.9e7,
@@ -495,8 +501,8 @@ const HALBERD = {
       needs: { power: 'p.bridge', coolant: 'l.core' }, draw: 16, priority: 9,
       heat: 100, critical: true,
     }),
-    mod('sensor', 'sensor', 'SENSOR SUITE', 'prow', [0, 3.0, 7], {
-      half: [5.5, 2.4, 3.4], hp: 8.0e6, vuln: 1.8, sys: 'COMPUTE',
+    mod('sensor', 'sensor', 'SENSOR SUITE', 'prow', [0, 2.6, 3.5], {
+      half: [3.6, 2.2, 6.0], hp: 8.0e6, vuln: 1.8, sys: 'COMPUTE',
       needs: { power: 'p.fwd', data: 'd.main' }, draw: 12, priority: 7, heat: 32,
     }),
     cond('c_data_main', 'data', 'src.computer', 'd.main', 'bridge', [3.4, -2.4, 1], {
@@ -533,13 +539,13 @@ const HALBERD = {
       fuelSection: 'spine', fuelPos: [-5.5, -1.0, -6], fuelHalf: [3.4, 3.6, 5.5],
       fuelHp: 1.2e7, leak: 0.10,
     }),
-    mod('rcs_fwd', 'rcs', 'BOW RCS BLOCK', 'prow', [0, -4.0, -7], {
-      r: 3.0, hp: 8.0e6, sys: 'PROPULSION',
+    mod('rcs_fwd', 'rcs', 'BOW RCS BLOCK', 'prow', [0, -3.0, -7], {
+      r: 2.4, hp: 8.0e6, sys: 'PROPULSION',
       needs: { power: 'p.fwd' }, draw: 9, priority: 8,
       extra: { axes: [1, 1, 0.15], lat: [1, 1, 0] },
     }),
-    mod('rcs_aft', 'rcs', 'AFT RCS BLOCK', 'engineering', [0, 6.0, -7], {
-      r: 3.0, hp: 8.0e6, sys: 'PROPULSION',
+    mod('rcs_aft', 'rcs', 'AFT RCS BLOCK', 'engineering', [0, 5.2, -7], {
+      r: 2.6, hp: 8.0e6, sys: 'PROPULSION',
       needs: { power: 'p.main' }, draw: 9, priority: 8,
       extra: { axes: [1, 1, 0.15], lat: [1, 1, 1] },
     }),
@@ -562,12 +568,12 @@ const HALBERD = {
       r: 2.0, hp: 6.0e6, sys: 'THERMAL',
       needs: { power: 'p.fwd' }, draw: 5, priority: 6,
     }),
-    mod('rad_L', 'radiator', 'PORT RADIATOR', 'sponsonL', [-1.5, 2.0, 2], {
-      half: [4.0, 0.5, 9.0], hp: 6.0e6, vuln: 1.6, sys: 'THERMAL',
+    mod('rad_L', 'radiator', 'PORT RADIATOR', 'sponsonL', [-1.2, 1.4, -1.5], {
+      half: [3.3, 0.45, 7.5], hp: 6.0e6, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.5 },
     }),
-    mod('rad_R', 'radiator', 'STBD RADIATOR', 'sponsonR', [1.5, 2.0, 2], {
-      half: [4.0, 0.5, 9.0], hp: 6.0e6, vuln: 1.6, sys: 'THERMAL',
+    mod('rad_R', 'radiator', 'STBD RADIATOR', 'sponsonR', [1.2, 1.4, -1.5], {
+      half: [3.3, 0.45, 7.5], hp: 6.0e6, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.5 },
     }),
     cond('l_core', 'coolant', 'src.pump', 'l.core', 'engineering', [6.0, -4.0, 5], {
@@ -579,7 +585,7 @@ const HALBERD = {
     cond('l_fwd', 'coolant', 'src.pump_aux', 'l.fwd', 'fwdhold', [6.0, -3.0, -6], {
       label: 'FORWARD LOOP', hp: 1.8e6, leak: 0.14,
     }),
-    cond('l_spon', 'coolant', 'l.core', 'l.spon', 'coredeck', [0, -7.5, -6], {
+    cond('l_spon', 'coolant', 'l.core', 'l.spon', 'coredeck', [0, -7.0, -6], {
       label: 'SPONSON LOOP', hp: 1.8e6, leak: 0.13,
     }),
 
@@ -591,7 +597,7 @@ const HALBERD = {
       half: [6.0, 3.4, 5.0], hp: 1.1e7, sys: 'LIFE',
       needs: { power: 'p.fwd' }, draw: 4, priority: 5,
     }),
-    mod('cargo_A', 'cargo', 'SPARES BAY', 'fwdhold', [-6.0, -2.6, 6], {
+    mod('cargo_A', 'cargo', 'SPARES BAY', 'fwdhold', [-5.7, -2.6, 6], {
       half: [2.8, 2.4, 3.8], hp: 7.0e6, sys: 'LOGISTICS',
       extra: { spares: 520 },
     }),
@@ -619,12 +625,12 @@ const HALBERD = {
       draw: 15, heat: 180,
     }),
     hp_('hp_sponL', 'PORT LASER', 'sponsonL', [-2.0, 0, 11], {
-      weapon: 'beam', mount: 'large', dir: [0, 0, 1], arc: 0.09,
+      weapon: 'beam', mount: 'large', dir: [0, 0, 1], arc: 0.15,
       needs: { power: 'p.sponL', data: 'd.fire', coolant: 'l.spon' },
       draw: 26, heat: 380, hp: 1.1e7,
     }),
     hp_('hp_sponR', 'STBD LASER', 'sponsonR', [2.0, 0, 11], {
-      weapon: 'beam', mount: 'large', dir: [0, 0, 1], arc: 0.09,
+      weapon: 'beam', mount: 'large', dir: [0, 0, 1], arc: 0.15,
       needs: { power: 'p.sponR', data: 'd.fire', coolant: 'l.spon' },
       draw: 26, heat: 380, hp: 1.1e7,
     }),
@@ -672,7 +678,7 @@ const MERIDIAN = {
     + 'failures — which conduit went, which party is cut off, whether the '
     + 'forward loop is still holding — rather than a single event.',
   tint: 0xb9c6d2,
-  shield: { capacity: 2.6e8, regen: 3.4e6, radii: [30, 22, 88] },
+  shield: { capacity: 2.6e8, regen: 3.4e6 },
   flight: {
     maxSpeed: 92, boostSpeed: 140, accelTime: 18, boostAccelTime: 12,
     pitchRate: 0.150, yawRate: 0.125, rollRate: 0.25, spool: 1.9,
@@ -680,7 +686,7 @@ const MERIDIAN = {
   sections: [
     sec('bowarray', 'BOW ARRAY', [0, 0, 111.5], [11, 9, 13.5], {
       armor: 'armorMedium', wall: 0.26, plateHp: 1.6e7, frameHp: 2.2e7,
-      density: 210, adj: ['fwdbattery'],
+      density: 210, adj: ['fwdbattery'], style: 'prow',
     }),
     sec('fwdbattery', 'FORWARD BATTERY', [0, 0, 85], [13, 11, 13], {
       armor: 'armorHeavy', wall: 0.50, plateHp: 3.4e7, frameHp: 4.6e7,
@@ -788,8 +794,8 @@ const MERIDIAN = {
       half: [3.0, 1.8, 2.8], hp: 1.6e7, vuln: 1.4, sys: 'COMPUTE',
       needs: { power: 'p.main', coolant: 'l.core' }, draw: 20, priority: 8, heat: 90,
     }),
-    mod('sensor', 'sensor', 'SENSOR SUITE', 'bowarray', [0, 3.0, 6], {
-      half: [7.0, 3.4, 4.4], hp: 1.4e7, vuln: 1.8, sys: 'COMPUTE',
+    mod('sensor', 'sensor', 'SENSOR SUITE', 'bowarray', [0, 2.6, 2.5], {
+      half: [4.4, 3.0, 7.0], hp: 1.4e7, vuln: 1.8, sys: 'COMPUTE',
       needs: { power: 'p.fwd', data: 'd.main' }, draw: 24, priority: 7, heat: 44,
     }),
     cond('c_data_main', 'data', 'src.computer', 'd.main', 'bridge', [5.0, -3.0, 2], {
@@ -848,13 +854,13 @@ const MERIDIAN = {
       fuelSection: 'engineering', fuelPos: [-8.0, 2.0, 6], fuelHalf: [4.4, 5.0, 8.0],
       fuelHp: 2.6e7, leak: 0.08,
     }),
-    mod('rcs_fwd', 'rcs', 'BOW RCS BLOCK', 'bowarray', [0, -4.5, -7], {
-      r: 4.0, hp: 1.4e7, sys: 'PROPULSION',
+    mod('rcs_fwd', 'rcs', 'BOW RCS BLOCK', 'bowarray', [0, -3.4, -7], {
+      r: 3.0, hp: 1.4e7, sys: 'PROPULSION',
       needs: { power: 'p.fwd' }, draw: 22, priority: 8,
       extra: { axes: [1, 1, 0.15], lat: [1, 1, 0] },
     }),
-    mod('rcs_aft', 'rcs', 'AFT RCS BLOCK', 'reactorroom', [0, 7.5, -10], {
-      r: 4.0, hp: 1.4e7, sys: 'PROPULSION',
+    mod('rcs_aft', 'rcs', 'AFT RCS BLOCK', 'reactorroom', [0, 6.6, -10], {
+      r: 3.4, hp: 1.4e7, sys: 'PROPULSION',
       needs: { power: 'p.main' }, draw: 22, priority: 8,
       extra: { axes: [1, 1, 0.15], lat: [1, 1, 1] },
     }),
@@ -882,20 +888,20 @@ const MERIDIAN = {
       r: 2.8, hp: 1.0e7, sys: 'THERMAL',
       needs: { power: 'p.main' }, draw: 12, priority: 6,
     }),
-    mod('rad_LF', 'radiator', 'PORT RADIATOR FWD', 'batteryLF', [-2.0, 3.0, 2], {
-      half: [4.4, 0.6, 11], hp: 1.0e7, vuln: 1.6, sys: 'THERMAL',
+    mod('rad_LF', 'radiator', 'PORT RADIATOR FWD', 'batteryLF', [-1.6, 2.0, -2.0], {
+      half: [3.7, 0.55, 9.0], hp: 1.0e7, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.25 },
     }),
-    mod('rad_RF', 'radiator', 'STBD RADIATOR FWD', 'batteryRF', [2.0, 3.0, 2], {
-      half: [4.4, 0.6, 11], hp: 1.0e7, vuln: 1.6, sys: 'THERMAL',
+    mod('rad_RF', 'radiator', 'STBD RADIATOR FWD', 'batteryRF', [1.6, 2.0, -2.0], {
+      half: [3.7, 0.55, 9.0], hp: 1.0e7, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.25 },
     }),
-    mod('rad_LA', 'radiator', 'PORT RADIATOR AFT', 'batteryLA', [-2.0, 3.0, 2], {
-      half: [4.4, 0.6, 11], hp: 1.0e7, vuln: 1.6, sys: 'THERMAL',
+    mod('rad_LA', 'radiator', 'PORT RADIATOR AFT', 'batteryLA', [-1.6, 2.0, -2.0], {
+      half: [3.7, 0.55, 9.0], hp: 1.0e7, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.25 },
     }),
-    mod('rad_RA', 'radiator', 'STBD RADIATOR AFT', 'batteryRA', [2.0, 3.0, 2], {
-      half: [4.4, 0.6, 11], hp: 1.0e7, vuln: 1.6, sys: 'THERMAL',
+    mod('rad_RA', 'radiator', 'STBD RADIATOR AFT', 'batteryRA', [1.6, 2.0, -2.0], {
+      half: [3.7, 0.55, 9.0], hp: 1.0e7, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.25 },
     }),
     cond('l_core', 'coolant', 'src.pump', 'l.core', 'reactorroom', [8.0, -6.0, 8], {
@@ -948,7 +954,7 @@ const MERIDIAN = {
     }),
     ...battery('bLF', 'batteryLF', {
       label: 'PORT BROADSIDE FWD', weapon: 'railgun',
-      magPos: [0, -2.4, -5], magHalf: [3.4, 1.8, 5.0], magHp: 1.4e7,
+      magPos: [0, -1.5, -5], magHalf: [3.2, 1.4, 5.0], magHp: 1.4e7,
       rounds: 1100, cookoff: 4.2e8,
       hoistPos: [3.4, 0, 0], hoistHp: 2.2e6,
       gunPos: [-2.0, 2.4, 8], gunHp: 2.0e7,
@@ -957,7 +963,7 @@ const MERIDIAN = {
     }),
     ...battery('bRF', 'batteryRF', {
       label: 'STBD BROADSIDE FWD', weapon: 'railgun',
-      magPos: [0, -2.4, -5], magHalf: [3.4, 1.8, 5.0], magHp: 1.4e7,
+      magPos: [0, -1.5, -5], magHalf: [3.2, 1.4, 5.0], magHp: 1.4e7,
       rounds: 1100, cookoff: 4.2e8,
       hoistPos: [-3.4, 0, 0], hoistHp: 2.2e6,
       gunPos: [2.0, 2.4, 8], gunHp: 2.0e7,
@@ -966,7 +972,7 @@ const MERIDIAN = {
     }),
     ...battery('bLA', 'batteryLA', {
       label: 'PORT BROADSIDE AFT', weapon: 'plasma',
-      magPos: [0, -2.4, -5], magHalf: [3.4, 1.8, 5.0], magHp: 1.4e7,
+      magPos: [0, -1.5, -5], magHalf: [3.2, 1.4, 5.0], magHp: 1.4e7,
       rounds: 600, cookoff: 3.0e8,
       hoistPos: [3.4, 0, 0], hoistHp: 2.2e6,
       gunPos: [-2.0, 2.4, 8], gunHp: 2.0e7,
@@ -975,7 +981,7 @@ const MERIDIAN = {
     }),
     ...battery('bRA', 'batteryRA', {
       label: 'STBD BROADSIDE AFT', weapon: 'plasma',
-      magPos: [0, -2.4, -5], magHalf: [3.4, 1.8, 5.0], magHp: 1.4e7,
+      magPos: [0, -1.5, -5], magHalf: [3.2, 1.4, 5.0], magHp: 1.4e7,
       rounds: 600, cookoff: 3.0e8,
       hoistPos: [-3.4, 0, 0], hoistHp: 2.2e6,
       gunPos: [2.0, 2.4, 8], gunHp: 2.0e7,
@@ -997,12 +1003,12 @@ const MERIDIAN = {
       draw: 70, heat: 340, hp: 1.6e7,
     }),
     hp_('hp_beamL', 'PORT LANCE', 'spine', [9.0, 8.0, 12], {
-      weapon: 'beam', mount: 'large', dir: [0.1, 0, 1], arc: 0.12,
+      weapon: 'beam', mount: 'large', dir: [0.1, 0, 1], arc: 0.20,
       needs: { power: 'p.main', data: 'd.fireF', coolant: 'l.core' },
       draw: 60, heat: 640, hp: 2.0e7,
     }),
     hp_('hp_beamR', 'STBD LANCE', 'spine', [-9.0, 8.0, 12], {
-      weapon: 'beam', mount: 'large', dir: [-0.1, 0, 1], arc: 0.12,
+      weapon: 'beam', mount: 'large', dir: [-0.1, 0, 1], arc: 0.20,
       needs: { power: 'p.main', data: 'd.fireF', coolant: 'l.core' },
       draw: 60, heat: 640, hp: 2.0e7,
     }),
@@ -1047,7 +1053,7 @@ const BASTION = {
     + 'Slow enough to be picked apart deliberately, and armed well enough that '
     + 'taking your time about it is expensive.',
   tint: 0xd9a86a,
-  shield: { capacity: 6.5e8, regen: 5.4e6, radii: [46, 34, 132] },
+  shield: { capacity: 6.5e8, regen: 5.4e6 },
   flight: {
     maxSpeed: 62, boostSpeed: 95, accelTime: 26, boostAccelTime: 18,
     pitchRate: 0.098, yawRate: 0.082, rollRate: 0.165, spool: 2.8,
@@ -1055,7 +1061,7 @@ const BASTION = {
   sections: [
     sec('prow', 'ARMOURED PROW', [0, 0, 170], [16, 13, 20], {
       armor: 'armorHeavy', wall: 0.90, plateHp: 8.0e7, frameHp: 1.0e8,
-      density: 360, adj: ['fwdbattery'],
+      density: 360, adj: ['fwdbattery'], style: 'prow',
     }),
     sec('fwdbattery', 'FORWARD BATTERY', [0, 0, 130], [19, 16, 20], {
       armor: 'armorHeavy', wall: 0.78, plateHp: 7.0e7, frameHp: 9.0e7,
@@ -1160,8 +1166,8 @@ const BASTION = {
       half: [4.2, 2.6, 4.0], hp: 3.0e7, vuln: 1.4, sys: 'COMPUTE',
       needs: { power: 'p.ring', coolant: 'l.core' }, draw: 42, priority: 8, heat: 140,
     }),
-    mod('sensor', 'sensor', 'TARGETING MAST', 'prow', [0, 7, 9], {
-      half: [9, 4.4, 6.0], hp: 2.6e7, vuln: 1.8, sys: 'COMPUTE',
+    mod('sensor', 'sensor', 'TARGETING MAST', 'prow', [0, 4.4, 3.5], {
+      half: [5.6, 3.8, 9.5], hp: 2.6e7, vuln: 1.8, sys: 'COMPUTE',
       needs: { power: 'p.fwd', data: 'd.main' }, draw: 44, priority: 7, heat: 60,
     }),
     cond('c_data_main', 'data', 'src.computer', 'd.main', 'citadel', [7, -4, -4], {
@@ -1178,10 +1184,10 @@ const BASTION = {
     cond('c_data_helm2', 'data', 'src.computer_aux', 'd.helm', 'coredeck', [-9, 4, -12], {
       label: 'AUX HELM RUN', hp: 3.4e6, vuln: 2.6,
     }),
-    cond('c_data_fireL', 'data', 'd.main', 'd.fireL', 'batteryLF', [6, 3, 6], {
+    cond('c_data_fireL', 'data', 'd.main', 'd.fireL', 'batteryLF', [6, 2.6, 6], {
       label: 'PORT DIRECTOR LINK', hp: 3.0e6, vuln: 2.8,
     }),
-    cond('c_data_fireR', 'data', 'd.main', 'd.fireR', 'batteryRF', [-6, 3, 6], {
+    cond('c_data_fireR', 'data', 'd.main', 'd.fireR', 'batteryRF', [-6, 2.6, 6], {
       label: 'STBD DIRECTOR LINK', hp: 3.0e6, vuln: 2.8,
     }),
     cond('c_data_eng', 'data', 'd.main', 'd.eng', 'engineering', [-12, 12, -18], {
@@ -1213,13 +1219,13 @@ const BASTION = {
       fuelSection: 'engineering', fuelPos: [-12, 3, 10], fuelHalf: [6, 7, 12],
       fuelHp: 6.0e7, leak: 0.07,
     }),
-    mod('rcs_fwd', 'rcs', 'PROW RCS', 'prow', [0, -7, -11], {
-      r: 6, hp: 3.0e7, sys: 'PROPULSION',
+    mod('rcs_fwd', 'rcs', 'PROW RCS', 'prow', [0, -5.2, -11], {
+      r: 4.2, hp: 3.0e7, sys: 'PROPULSION',
       needs: { power: 'p.fwd' }, draw: 52, priority: 8,
       extra: { axes: [1, 1, 0.15], lat: [1, 1, 0] },
     }),
-    mod('rcs_aft', 'rcs', 'AFT RCS', 'reactorroom', [0, 11, -14], {
-      r: 6, hp: 3.0e7, sys: 'PROPULSION',
+    mod('rcs_aft', 'rcs', 'AFT RCS', 'reactorroom', [0, 10.0, -14], {
+      r: 5.2, hp: 3.0e7, sys: 'PROPULSION',
       needs: { power: 'p.ring' }, draw: 52, priority: 8,
       extra: { axes: [1, 1, 0.15], lat: [1, 1, 1] },
     }),
@@ -1246,20 +1252,20 @@ const BASTION = {
       r: 4, hp: 2.2e7, sys: 'THERMAL',
       needs: { power: 'p.ring' }, draw: 26, priority: 6,
     }),
-    mod('rad_LF', 'radiator', 'PORT RADIATOR FWD', 'batteryLF', [-3, 4.6, 4], {
-      half: [6, 0.8, 17], hp: 2.2e7, vuln: 1.6, sys: 'THERMAL',
+    mod('rad_LF', 'radiator', 'PORT RADIATOR FWD', 'batteryLF', [-2.4, 2.9, -3.0], {
+      half: [5.2, 0.7, 14.0], hp: 2.2e7, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.25 },
     }),
-    mod('rad_RF', 'radiator', 'STBD RADIATOR FWD', 'batteryRF', [3, 4.6, 4], {
-      half: [6, 0.8, 17], hp: 2.2e7, vuln: 1.6, sys: 'THERMAL',
+    mod('rad_RF', 'radiator', 'STBD RADIATOR FWD', 'batteryRF', [2.4, 2.9, -3.0], {
+      half: [5.2, 0.7, 14.0], hp: 2.2e7, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.25 },
     }),
-    mod('rad_LA', 'radiator', 'PORT RADIATOR AFT', 'batteryLA', [-3, 4.6, 4], {
-      half: [6, 0.8, 17], hp: 2.2e7, vuln: 1.6, sys: 'THERMAL',
+    mod('rad_LA', 'radiator', 'PORT RADIATOR AFT', 'batteryLA', [-2.4, 2.9, -3.0], {
+      half: [5.2, 0.7, 14.0], hp: 2.2e7, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.25 },
     }),
-    mod('rad_RA', 'radiator', 'STBD RADIATOR AFT', 'batteryRA', [3, 4.6, 4], {
-      half: [6, 0.8, 17], hp: 2.2e7, vuln: 1.6, sys: 'THERMAL',
+    mod('rad_RA', 'radiator', 'STBD RADIATOR AFT', 'batteryRA', [2.4, 2.9, -3.0], {
+      half: [5.2, 0.7, 14.0], hp: 2.2e7, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.25 },
     }),
     cond('l_core', 'coolant', 'src.pump', 'l.core', 'reactorroom', [12, -9, 12], {
@@ -1278,11 +1284,11 @@ const BASTION = {
       label: 'AFT BATTERY LOOP', hp: 4.2e6, leak: 0.11,
     }),
 
-    mod('lifesupport', 'lifeSupport', 'LIFE SUPPORT', 'coredeck', [14, 5, 12], {
+    mod('lifesupport', 'lifeSupport', 'LIFE SUPPORT', 'coredeck', [13.7, 5, 12], {
       half: [4.4, 3.4, 5.0], hp: 3.0e7, sys: 'LIFE',
       needs: { power: 'p.fwd' }, draw: 60, priority: 9, extra: { rate: 0.045 },
     }),
-    mod('lifesupport_b', 'lifeSupport', 'AUX SCRUBBERS', 'fwdhold', [14, 5, -12], {
+    mod('lifesupport_b', 'lifeSupport', 'AUX SCRUBBERS', 'fwdhold', [13.2, 5, -12], {
       half: [4.4, 3.4, 5.0], hp: 2.6e7, sys: 'LIFE',
       needs: { power: 'p.ring' }, draw: 50, priority: 8, extra: { rate: 0.038 },
     }),
@@ -1310,7 +1316,7 @@ const BASTION = {
     }),
     ...battery('bLF', 'batteryLF', {
       label: 'PORT BROADSIDE FWD', weapon: 'railgun',
-      magPos: [0, -3.4, -8], magHalf: [5, 2.6, 8], magHp: 3.0e7,
+      magPos: [0, -2.2, -8], magHalf: [4.6, 1.9, 8], magHp: 3.0e7,
       rounds: 2000, cookoff: 1.1e9,
       hoistPos: [5, 0, 0], hoistHp: 4.0e6,
       gunPos: [-3, 3.4, 12], gunHp: 4.4e7,
@@ -1319,7 +1325,7 @@ const BASTION = {
     }),
     ...battery('bRF', 'batteryRF', {
       label: 'STBD BROADSIDE FWD', weapon: 'railgun',
-      magPos: [0, -3.4, -8], magHalf: [5, 2.6, 8], magHp: 3.0e7,
+      magPos: [0, -2.2, -8], magHalf: [4.6, 1.9, 8], magHp: 3.0e7,
       rounds: 2000, cookoff: 1.1e9,
       hoistPos: [-5, 0, 0], hoistHp: 4.0e6,
       gunPos: [3, 3.4, 12], gunHp: 4.4e7,
@@ -1328,7 +1334,7 @@ const BASTION = {
     }),
     ...battery('bLA', 'batteryLA', {
       label: 'PORT BROADSIDE AFT', weapon: 'plasma',
-      magPos: [0, -3.4, -8], magHalf: [5, 2.6, 8], magHp: 3.0e7,
+      magPos: [0, -2.2, -8], magHalf: [4.6, 1.9, 8], magHp: 3.0e7,
       rounds: 1200, cookoff: 8.0e8,
       hoistPos: [5, 0, 0], hoistHp: 4.0e6,
       gunPos: [-3, 3.4, 12], gunHp: 4.4e7,
@@ -1337,7 +1343,7 @@ const BASTION = {
     }),
     ...battery('bRA', 'batteryRA', {
       label: 'STBD BROADSIDE AFT', weapon: 'plasma',
-      magPos: [0, -3.4, -8], magHalf: [5, 2.6, 8], magHp: 3.0e7,
+      magPos: [0, -2.2, -8], magHalf: [4.6, 1.9, 8], magHp: 3.0e7,
       rounds: 1200, cookoff: 8.0e8,
       hoistPos: [-5, 0, 0], hoistHp: 4.0e6,
       gunPos: [3, 3.4, 12], gunHp: 4.4e7,
@@ -1426,6 +1432,44 @@ function deriveMassProperties(spec) {
 }
 
 /** Bounding radius for broadphase and for the radar blip scale. */
+/**
+ * Semi-axes of the shield ellipsoid, DERIVED from the compartment boxes the way
+ * the control torque is derived from the inertia tensor.
+ *
+ * Authoring these by hand is how the first pass went wrong, and it went wrong
+ * silently: every hull's bow, stern and drive bay stood proud of its own bubble
+ * — ten of the MERIDIAN's fourteen compartments were outside it, including the
+ * drive bay at 1.47x and the reactor room at 1.16x. A shot along the axis
+ * therefore met plate before it ever met the field, which made the shield a
+ * waist-band rather than a bubble, made head-on and stern attacks bypass it
+ * entirely, and left the drives — the most exposed structure on every hull —
+ * permanently unprotected. Since losing the drives is most of what ends a ship,
+ * that one geometry error decided nearly every engagement in the game.
+ *
+ * `fit` is the uniform scale that pulls the furthest compartment CORNER onto the
+ * surface. Matching the per-axis extents alone is not enough: an ellipsoid whose
+ * semi-axes equal a box's half-extents does not contain that box's corners.
+ */
+const SHIELD_MARGIN = 1.04;
+function shieldRadii(spec, com) {
+  const ext = [0, 0, 0];
+  for (const s of spec.sections) {
+    for (let k = 0; k < 3; k++) {
+      ext[k] = Math.max(ext[k], Math.abs(s.pos[k] - com[k]) + s.half[k]);
+    }
+  }
+  let fit = 1;
+  for (const s of spec.sections) {
+    let q = 0;
+    for (let k = 0; k < 3; k++) {
+      const e = (Math.abs(s.pos[k] - com[k]) + s.half[k]) / ext[k];
+      q += e * e;
+    }
+    fit = Math.max(fit, Math.sqrt(q));
+  }
+  return ext.map((v) => Math.round(v * fit * SHIELD_MARGIN));
+}
+
 function boundingRadius(spec) {
   let r = 0;
   for (const s of spec.sections) {
@@ -1542,18 +1586,42 @@ function validate(spec) {
     }
   }
 
-  // Internal modules must sit inside the compartment that owns them, or the
-  // cutaway draws them outside the box they are supposedly bolted into.
+  // Internal modules must sit inside the compartment that owns them — and
+  // inside the SHELL that compartment is drawn with, which is a tighter box
+  // than the raycast volume because shells taper.
+  //
+  // This used to test the raycast volume with a metre and a half of slack, and
+  // that was true enough when a hull was a row of boxes. It is not any more:
+  // fifty-eight modules across the four hulls passed that test while sitting
+  // outside the visible plating, radiators and magazines hanging out of the
+  // sides of tapered sponsons and bow sensors floating clear of the wedge.
+  //
+  // They are authored to fit now, so this is strict. Failing at load is the
+  // point: the alternative is quietly moving a magazine somewhere the author
+  // did not put it, which changes what a shot into that sponson hits.
+  //
   // Hardpoints are exempt from the extent test — a turret is meant to stand
-  // proud of the hull — but their mounting point still has to be on the ship.
+  // proud of the hull, and `mountFrame` seats it on the plating deliberately —
+  // but their mounting point still has to be on the ship.
   for (const m of spec.modules) {
     const s = byIdOf(spec, m.section);
-    const ext = m.kind === 'hardpoint' ? [0, 0, 0] : (m.half || [m.r, m.r, m.r]);
-    const slack = m.kind === 'hardpoint' ? 0 : 1.5;
+    const gun = m.kind === 'hardpoint';
+    const ext = gun ? [0, 0, 0] : (m.half || [m.r, m.r, m.r]);
     for (let k = 0; k < 3; k++) {
-      if (Math.abs(m.pos[k]) + ext[k] > s.half[k] + slack) {
+      // Fore and aft faces are not tapered; the lateral ones are, and the
+      // shell is narrowest at one end of the module's own span.
+      const skin = (k === 2 || gun) ? 1 : Math.min(
+        skinFraction(s.style, k, m.pos[k] < 0 ? -1 : 1, m.pos[2] - ext[2], s.half[2]),
+        skinFraction(s.style, k, m.pos[k] < 0 ? -1 : 1, m.pos[2] + ext[2], s.half[2]),
+      );
+      const limit = s.half[k] * skin;
+      const over = Math.abs(m.pos[k]) + ext[k] - limit;
+      if (over > 1e-6) {
         throw new Error(
-          `${spec.id}: module "${m.id}" sticks out of section "${s.id}" on axis ${k}`,
+          `${spec.id}: module "${m.id}" sticks ${over.toFixed(2)} m out of the `
+          + `${s.style} shell of section "${s.id}" on axis ${k} `
+          + `(reaches ${(Math.abs(m.pos[k]) + ext[k]).toFixed(2)}, `
+          + `plating at ${limit.toFixed(2)})`,
         );
       }
     }
@@ -1578,7 +1646,14 @@ function compile(spec) {
   }
 
   const nodes = validate(spec);
+  // Author against the box, then sit inside the shell. Order matters: `validate`
+  // holds the tables to the compartment they claim to be in, and only then does
+  // anything get moved to match what is drawn.
   const { mass, com, inertia } = deriveMassProperties(spec);
+
+  // The field has to actually enclose the ship. Derived, not authored — see
+  // `shieldRadii`.
+  spec.shield.radii = shieldRadii(spec, com);
 
   // Control authority is DERIVED, never authored. A table says how fast the
   // ship should turn (`pitchRate` etc.) and how long the thrusters should take

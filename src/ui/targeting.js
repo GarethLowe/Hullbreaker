@@ -236,10 +236,21 @@ export class Targeting {
     if (!ship || !this.target) {
       return null;
     }
-    // Lead is computed for the SLOWEST fixed gun, because that is the one that
-    // will miss if you trust the fastest.
+    // Lead is computed for the guns the LEFT BUTTON is actually going to fire,
+    // and within those for the slowest, because that is the one that will miss
+    // if you trust the fastest.
+    //
+    // This used to read fireGroups[0] — the mounts the AI has to point the ship
+    // at. On the player's cruiser that group is the ion projector and the two
+    // lances, so the pip solved for a 1400 m/s weapon while the mass drivers
+    // doing the actual shooting run at 2600, over-leading by 86% — about a
+    // hundred metres of error at three kilometres against a crossing target.
+    // The pip is the single mark the player aims by; it has to describe the
+    // gun under their finger.
+    const group = ship.weaponGroups[this.game.player ? this.game.player.primary : 0];
+    const mounts = group ? group.mounts : ship.fireGroups[0];
     let speed = Infinity;
-    for (const m of ship.fireGroups[0]) {
+    for (const m of mounts) {
       if (m.weapon.muzzleVel) {
         speed = Math.min(speed, m.weapon.muzzleVel);
       }
@@ -333,7 +344,13 @@ export class Targeting {
       // bearing sets the angle. Forward (+Z local) is up on the disc.
       const horiz = Math.hypot(c.x, c.z);
       const rr = Math.min(1, horiz / range) * R;
-      const ang = Math.atan2(c.x, c.z);
+      // NEGATED x. The body frame is right-handed with +Z forward, which puts
+      // +X to PORT (see flight.js) — so `atan2(c.x, c.z)` swept the wrong way
+      // and the scope was mirrored left-for-right: a contact off the port bow
+      // was painted off the starboard bow, and every evasive turn read as a
+      // turn into the threat rather than away from it. The crosshair label
+      // below has always said "starboard is right"; now it is.
+      const ang = Math.atan2(-c.x, c.z);
       const px = cx + Math.sin(ang) * rr;
       const pyBase = cy - Math.cos(ang) * rr * squash;
       // Elevation stalk: height above/below the disc plane, same scale as the
