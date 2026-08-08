@@ -29,8 +29,13 @@
 // -----------------------------------------------------------------------------
 // The one thing the tables reach outward for: where a compartment's plating
 // actually is, so a module can be seated inside the shell rather than merely
-// inside the box. See `seatModules`.
-import { skinFraction } from '../world/hardware.js';
+// inside the box. See `seatModules`. The kit is consulted for the same reason
+// the shells are: a turret is part of the ship's extent now, and the shield
+// has to be derived from what is actually bolted on rather than from the
+// compartment boxes alone.
+import { skinFraction, mountFrame, mountStyle } from '../world/hardware.js';
+import { MUZZLES, PIVOTS } from '../world/kit.js';
+import { WEAPONS, MOUNTS } from '../weapons/defs.js';
 
 /**
  * Material response used by the penetration solver (joules absorbed / metre).
@@ -128,7 +133,17 @@ const mod = (id, kind, label, section, pos, o = {}) => ({
   ...o.extra,
 });
 
-/** A conduit: one edge of one network. Conduits are modules too — shoot them. */
+/**
+ * A conduit: one edge of one network. Conduits are modules too — shoot them.
+ *
+ * `cap` is what the run is RATED to carry, 0..1 of full service. A main trunk
+ * is 1. An emergency tie is a thinner cable or a smaller-bore pipe laid down a
+ * different part of the ship, and carries a fraction — enough to keep a branch
+ * alive and derated when its trunk is cut, not enough to pretend nothing
+ * happened. The solver takes the best path available and that path is only as
+ * good as its narrowest run, so redundancy costs capability rather than being
+ * free. See `_tickNetworks`.
+ */
 const cond = (id, net, from, to, section, pos, o = {}) => mod(
   id, 'conduit', o.label || `${net.toUpperCase()} RUN`, section, pos,
   {
@@ -138,7 +153,11 @@ const cond = (id, net, from, to, section, pos, o = {}) => mod(
     mat: 'soft',
     sys: net === 'coolant' ? 'THERMAL' : (net === 'data' ? 'COMPUTE' : 'POWER'),
     critical: o.critical,
-    extra: { net, from, to, leak: o.leak || 0 },
+    extra: {
+      net, from, to, cap: o.cap !== undefined ? o.cap : 1, leak: o.leak || 0,
+      /** Deliberately the only feed to its node; exempt from the ring rule. */
+      sole: !!o.sole,
+    },
   },
 );
 
@@ -164,6 +183,33 @@ const hp_ = (id, label, section, pos, o = {}) => mod(
 );
 
 /**
+ * An emergency cross-connect: the same edge machinery as `cond`, different
+ * intent and different numbers.
+ *
+ * Nobody builds a capital ship whose lighting, cooling or fire control can be
+ * ended by one round in the right place, and the first pass did exactly that —
+ * seventy nodes across the four hulls hung off a single run. But redundancy on
+ * a warship is not a second main; it is a thinner cable or a smaller-bore pipe
+ * routed down a different part of the ship, sized to keep a branch alive rather
+ * than to keep it at full output. So a tie is cheaper to lose, and what it
+ * carries is a fraction: cut the trunk and the battery still trains, slower.
+ *
+ * That is the trade the `cap` model exists to express — cross-connecting costs
+ * capability instead of being free, and a ship fights on after a hit that used
+ * to switch a system off outright.
+ */
+const tie = (id, net, from, to, section, pos, o = {}) => cond(
+  id, net, from, to, section, pos,
+  {
+    label: 'EMERGENCY TIE',
+    cap: 0.5,
+    hp: 1.1e6,
+    r: 0.9,
+    ...o,
+  },
+);
+
+/**
  * A gun battery as a fitting rather than three loose parts: the mount, the
  * magazine that feeds it, and the hoist that ties it to a power node. Every
  * warship here carries several, and hand-placing the pieces one at a time is
@@ -177,15 +223,22 @@ const battery = (id, section, o) => [
     sys: 'ORDNANCE',
     extra: { rounds: o.rounds, cookoff: o.cookoff },
   }),
-  cond(`c_hoist_${id}`, 'power', o.from, `p.${id}`, section, o.hoistPos, {
-    label: `${o.label} HOIST`, hp: o.hoistHp,
+  // `p.gun_` and not `p.${id}`: the forward battery's id is 'fwd', which
+  // collided with the ship's own forward bus and made its hoist a run from
+  // p.fwd to p.fwd. A self-loop supplies nothing, so on all four hulls the
+  // main battery was the one gun whose feed could not be cut, while every
+  // broadside died to a single round through its hoist. `sole` marks it as a
+  // deliberate single point of failure — a gun is allowed to have exactly one
+  // feed, which is what makes shooting the hoist worth doing.
+  cond(`c_hoist_${id}`, 'power', o.from, `p.gun_${id}`, section, o.hoistPos, {
+    label: `${o.label} HOIST`, hp: o.hoistHp, sole: true,
   }),
   hp_(`hp_${id}`, o.label, section, o.gunPos, {
     weapon: o.weapon,
     mount: o.mount || 'large',
     dir: o.dir,
     arc: o.arc,
-    needs: { power: `p.${id}`, data: o.data, ...(o.cool ? { coolant: o.cool } : {}) },
+    needs: { power: `p.gun_${id}`, data: o.data, ...(o.cool ? { coolant: o.cool } : {}) },
     feed: `mag_${id}`,
     draw: o.draw,
     heat: o.heat,
@@ -297,19 +350,40 @@ const SABRE = {
     }),
     mod('sensor', 'sensor', 'SENSOR ARRAY', 'prow', [0, 1.4, 2.6], {
       half: [2.4, 1.5, 4.2], hp: 4.5e6, vuln: 1.8, sys: 'COMPUTE',
-      needs: { power: 'p.fwd', data: 'd.main' }, draw: 7, priority: 7, heat: 24,
+      needs: { power: 'p.fwd', data: 'd.main' , coolant: 'l.core' }, draw: 7, priority: 7, heat: 24,
     }),
     cond('c_data_main', 'data', 'src.computer', 'd.main', 'bridge', [2.4, -1.6, 2], {
-      label: 'AVIONICS BUS', hp: 1.0e6, vuln: 2.6,
+      label: 'AVIONICS BUS', hp: 1.0e6, vuln: 2.6, sole: true,
     }),
     cond('c_data_helm', 'data', 'src.computer', 'd.helm', 'bridge', [-2.4, -1.6, 2], {
-      label: 'HELM BUS', hp: 1.0e6, vuln: 2.6, critical: true,
+      label: 'HELM BUS', hp: 1.0e6, vuln: 2.6, sole: true, critical: true,
     }),
     cond('c_data_fire', 'data', 'd.main', 'd.fire', 'spine', [0, 4.2, -4], {
       label: 'FIRE CONTROL BUS', hp: 1.0e6, vuln: 2.6,
     }),
     cond('c_data_eng', 'data', 'd.main', 'd.eng', 'engineering', [-4.0, 3.6, 4], {
       label: 'DAMAGE CONTROL BUS', hp: 1.0e6, vuln: 2.6,
+    }),
+
+    // Casualty routing. A picket carries one of everything, so the ties are
+    // what stop one of everything being one round.
+    tie('c_tie_keel', 'power', 'src.reactor', 'p.main', 'engineering', [0, -3.4, 6], {
+      label: 'KEEL TRUNK', cap: 0.6,
+    }),
+    tie('c_tie_fwd', 'power', 'p.main', 'p.fwd', 'fwdhold', [0, -2.6, -4], {
+      label: 'KEEL RUN', cap: 0.55,
+    }),
+    tie('c_tie_pod', 'power', 'p.podR', 'p.podL', 'spine', [3.0, -4.0, -3], {
+      label: 'POD CROSS-TIE', cap: 0.5,
+    }),
+    tie('c_tie_fire', 'data', 'd.eng', 'd.fire', 'engineering', [4.0, 3.6, 4], {
+      label: 'DIRECTOR CROSS-TIE', cap: 0.5,
+    }),
+    tie('l_tie_aft', 'coolant', 'src.pump', 'l.aft', 'engineering', [4.0, -3.2, 5], {
+      label: 'AUXILIARY DISCHARGE', cap: 0.6, leak: 0.1,
+    }),
+    tie('l_tie_pod', 'coolant', 'l.aft', 'l.pod', 'podL', [-2.0, 0, -3], {
+      label: 'POD CROSS-CONNECT', cap: 0.5, leak: 0.1,
     }),
 
     mod('shieldgen', 'shieldGen', 'SHIELD PROJECTOR', 'spine', [0, 2.6, -4], {
@@ -375,7 +449,7 @@ const SABRE = {
       rounds: 320, cookoff: 4.5e7,
       hoistPos: [2.6, -0.4, -2], hoistHp: 1.1e6,
       gunPos: [0, 2.4, 7], gunHp: 8.0e6,
-      from: 'p.fwd', data: 'd.fire', dir: [0, 0, 1], arc: 0.16,
+      from: 'p.fwd', data: 'd.fire', cool: 'l.core', dir: [0, 0, 1], arc: 0.16,
       draw: 9, heat: 120,
     }),
     hp_('hp_podL', 'PORT LASER', 'podL', [-1.6, 0, 7.5], {
@@ -390,7 +464,7 @@ const SABRE = {
     }),
     hp_('hp_pd', 'POINT DEFENCE', 'spine', [0, 5.6, 2], {
       weapon: 'repeater', mount: 'small', dir: [0, 0.3, 1], arc: 0.9,
-      needs: { power: 'p.main', data: 'd.fire' }, feed: 'mag_fwd',
+      needs: { power: 'p.main', data: 'd.fire' , coolant: 'l.core' }, feed: 'mag_fwd',
       draw: 2, heat: 40, hp: 4.0e6,
     }),
   ],
@@ -503,19 +577,42 @@ const HALBERD = {
     }),
     mod('sensor', 'sensor', 'SENSOR SUITE', 'prow', [0, 2.6, 3.5], {
       half: [3.6, 2.2, 6.0], hp: 8.0e6, vuln: 1.8, sys: 'COMPUTE',
-      needs: { power: 'p.fwd', data: 'd.main' }, draw: 12, priority: 7, heat: 32,
+      needs: { power: 'p.fwd', data: 'd.main' , coolant: 'l.fwd' }, draw: 12, priority: 7, heat: 32,
     }),
     cond('c_data_main', 'data', 'src.computer', 'd.main', 'bridge', [3.4, -2.4, 1], {
-      label: 'AVIONICS BUS', hp: 1.3e6, vuln: 2.6,
+      label: 'AVIONICS BUS', hp: 1.3e6, vuln: 2.6, sole: true,
     }),
     cond('c_data_helm', 'data', 'src.computer', 'd.helm', 'bridge', [-3.4, -2.4, 1], {
-      label: 'HELM BUS', hp: 1.3e6, vuln: 2.6, critical: true,
+      label: 'HELM BUS', hp: 1.3e6, vuln: 2.6, sole: true, critical: true,
     }),
     cond('c_data_fire', 'data', 'd.main', 'd.fire', 'spine', [0, 7.0, -8], {
       label: 'FIRE CONTROL BUS', hp: 1.3e6, vuln: 2.6,
     }),
     cond('c_data_eng', 'data', 'd.main', 'd.eng', 'coredeck', [-5.5, 6.0, 5], {
       label: 'DAMAGE CONTROL BUS', hp: 1.3e6, vuln: 2.6,
+    }),
+
+    // Casualty routing.
+    tie('c_tie_keel', 'power', 'src.reactor', 'p.main', 'engineering', [0, -5.5, 8], {
+      label: 'KEEL TRUNK', cap: 0.6,
+    }),
+    tie('c_tie_bridge', 'power', 'p.main', 'p.bridge', 'bridge', [3.4, -3.4, -6], {
+      label: 'BRIDGE ALTERNATE', cap: 0.45,
+    }),
+    tie('c_tie_spon', 'power', 'p.sponR', 'p.sponL', 'spine', [0, -6.0, 3], {
+      label: 'SPONSON CROSS-TIE', cap: 0.5,
+    }),
+    tie('c_tie_fire', 'data', 'd.eng', 'd.fire', 'coredeck', [5.5, 6.0, 5], {
+      label: 'DIRECTOR CROSS-TIE', cap: 0.5,
+    }),
+    tie('l_tie_aft', 'coolant', 'src.pump', 'l.aft', 'engineering', [-6.0, -4.0, 5], {
+      label: 'AUXILIARY DISCHARGE', cap: 0.6, leak: 0.1,
+    }),
+    tie('l_tie_fwd', 'coolant', 'l.core', 'l.fwd', 'fwdhold', [-6.0, -3.0, -6], {
+      label: 'FORWARD CROSS-CONNECT', cap: 0.5, leak: 0.1,
+    }),
+    tie('l_tie_spon', 'coolant', 'l.fwd', 'l.spon', 'coredeck', [6.0, -7.0, -6], {
+      label: 'SPONSON CROSS-CONNECT', cap: 0.5, leak: 0.1,
     }),
 
     mod('shieldgen', 'shieldGen', 'SHIELD PROJECTOR', 'spine', [0, 3.5, 5], {
@@ -612,7 +709,7 @@ const HALBERD = {
       rounds: 900, cookoff: 2.2e8,
       hoistPos: [4.4, -0.5, -4], hoistHp: 1.8e6,
       gunPos: [0, 5.5, 6], gunHp: 1.6e7,
-      from: 'p.fwd', data: 'd.fire', dir: [0, 0, 1], arc: 0.16,
+      from: 'p.fwd', data: 'd.fire', cool: 'l.fwd', dir: [0, 0, 1], arc: 0.16,
       draw: 16, heat: 200,
     }),
     ...battery('dor', 'dorsalmount', {
@@ -636,12 +733,12 @@ const HALBERD = {
     }),
     hp_('hp_pdA', 'POINT DEFENCE A', 'spine', [5.0, 7.5, 6], {
       weapon: 'repeater', mount: 'small', dir: [0.3, 0.4, 1], arc: 1.1,
-      needs: { power: 'p.main', data: 'd.fire' }, feed: 'mag_dor',
+      needs: { power: 'p.main', data: 'd.fire' , coolant: 'l.core' }, feed: 'mag_dor',
       draw: 3, heat: 50, hp: 5.0e6,
     }),
     hp_('hp_pdB', 'POINT DEFENCE B', 'spine', [-5.0, 7.5, 6], {
       weapon: 'repeater', mount: 'small', dir: [-0.3, 0.4, 1], arc: 1.1,
-      needs: { power: 'p.main', data: 'd.fire' }, feed: 'mag_dor',
+      needs: { power: 'p.main', data: 'd.fire' , coolant: 'l.core' }, feed: 'mag_dor',
       draw: 3, heat: 50, hp: 5.0e6,
     }),
     mod('mag_tor', 'magazine', 'TORPEDO STOWAGE', 'fwdhold', [0, -3.4, -6], {
@@ -650,7 +747,7 @@ const HALBERD = {
     }),
     hp_('hp_tor', 'TORPEDO TUBES', 'fwdhold', [0, -5.4, 8], {
       weapon: 'torpedo', mount: 'large', dir: [0, -0.05, 1], arc: 0.20,
-      needs: { power: 'p.fwd', data: 'd.fire' }, feed: 'mag_tor',
+      needs: { power: 'p.fwd', data: 'd.fire' , coolant: 'l.fwd' }, feed: 'mag_tor',
       draw: 4, heat: 30, hp: 9.0e6,
     }),
   ],
@@ -796,7 +893,7 @@ const MERIDIAN = {
     }),
     mod('sensor', 'sensor', 'SENSOR SUITE', 'bowarray', [0, 2.6, 2.5], {
       half: [4.4, 3.0, 7.0], hp: 1.4e7, vuln: 1.8, sys: 'COMPUTE',
-      needs: { power: 'p.fwd', data: 'd.main' }, draw: 24, priority: 7, heat: 44,
+      needs: { power: 'p.fwd', data: 'd.main' , coolant: 'l.fwd' }, draw: 24, priority: 7, heat: 44,
     }),
     cond('c_data_main', 'data', 'src.computer', 'd.main', 'bridge', [5.0, -3.0, 2], {
       label: 'AVIONICS BUS', hp: 2.2e6, vuln: 2.6,
@@ -825,6 +922,33 @@ const MERIDIAN = {
     }),
     cond('c_data_eng', 'data', 'd.main', 'd.eng', 'engineering', [-8.0, 8.0, -12], {
       label: 'DAMAGE CONTROL BUS', hp: 2.0e6, vuln: 2.6,
+    }),
+
+    // Casualty routing. A cruiser's whole argument is that nothing vital exists
+    // only once; before these, seventeen of its nodes did.
+    tie('c_tie_bridge', 'power', 'p.main', 'p.bridge', 'bridge', [4.0, -4.0, -8], {
+      label: 'BRIDGE ALTERNATE', cap: 0.45,
+    }),
+    tie('c_tie_batF', 'power', 'p.batRF', 'p.batLF', 'spine', [0, 6.0, -2], {
+      label: 'FWD BATTERY CROSS-TIE', cap: 0.5,
+    }),
+    tie('c_tie_batA', 'power', 'p.batRA', 'p.batLA', 'coredeck', [0, 0, 2], {
+      label: 'AFT BATTERY CROSS-TIE', cap: 0.5,
+    }),
+    tie('c_tie_fire', 'data', 'd.fireA', 'd.fireF', 'spine', [-7.0, 9.5, -10], {
+      label: 'DIRECTOR CROSS-TIE', cap: 0.6,
+    }),
+    tie('c_tie_eng', 'data', 'd.fireA', 'd.eng', 'engineering', [8.0, 8.0, -12], {
+      label: 'DC ALTERNATE', cap: 0.5,
+    }),
+    tie('l_tie_core', 'coolant', 'l.core', 'l.aft', 'engineering', [4.0, -8.0, -12], {
+      label: 'MAIN CROSS-CONNECT', cap: 0.55, leak: 0.1,
+    }),
+    tie('l_tie_fwd', 'coolant', 'l.fwd', 'l.aft', 'spine', [0, -9.0, -10], {
+      label: 'FORWARD CROSS-CONNECT', cap: 0.5, leak: 0.1,
+    }),
+    tie('l_tie_bat', 'coolant', 'l.batF', 'l.batA', 'coredeck', [6.0, -5.0, 8], {
+      label: 'BATTERY CROSS-CONNECT', cap: 0.5, leak: 0.1,
     }),
 
     // ---- DEFENCE ----------------------------------------------------------
@@ -903,6 +1027,19 @@ const MERIDIAN = {
     mod('rad_RA', 'radiator', 'STBD RADIATOR AFT', 'batteryRA', [1.6, 2.0, -2.0], {
       half: [3.7, 0.55, 9.0], hp: 1.0e7, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.25 },
+    }),
+    // Spine and keel panels. Four wing radiators could not reject what this hull
+    // makes at rest: the loops settled at 94 C and the plants ran at 78% of
+    // rating with nothing wrong and nothing happening. Deliberately NOT on the
+    // wings — heat rejection that all lives on four surfaces goes away together
+    // the first time somebody rakes the broadsides.
+    mod('rad_D', 'radiator', 'DORSAL RADIATOR', 'spine', [0, 9.5, -6], {
+      half: [5.5, 0.55, 9.0], hp: 9.0e6, vuln: 1.6, sys: 'THERMAL',
+      extra: { reject: 0.15 },
+    }),
+    mod('rad_V', 'radiator', 'KEEL RADIATOR', 'engineering', [0, -9.0, -6], {
+      half: [6.0, 0.55, 10.0], hp: 9.0e6, vuln: 1.6, sys: 'THERMAL',
+      extra: { reject: 0.15 },
     }),
     cond('l_core', 'coolant', 'src.pump', 'l.core', 'reactorroom', [8.0, -6.0, 8], {
       label: 'CORE LOOP', hp: 3.0e6, leak: 0.15,
@@ -994,7 +1131,7 @@ const MERIDIAN = {
     }),
     hp_('hp_tor', 'TORPEDO TUBES', 'magdeck', [0, -4.2, 12], {
       weapon: 'torpedo', mount: 'large', dir: [0, -0.04, 1], arc: 0.22,
-      needs: { power: 'p.fwd', data: 'd.fireF' }, feed: 'mag_tor',
+      needs: { power: 'p.fwd', data: 'd.fireF', coolant: 'l.core' }, feed: 'mag_tor',
       draw: 8, heat: 40, hp: 1.8e7,
     }),
     hp_('hp_ion', 'ION PROJECTOR', 'forehold', [0, -6.0, 11], {
@@ -1014,17 +1151,23 @@ const MERIDIAN = {
     }),
     hp_('hp_pdA', 'POINT DEFENCE A', 'spine', [8.0, 11.0, -10], {
       weapon: 'repeater', mount: 'small', dir: [0.35, 0.4, 0.6], arc: 1.2,
-      needs: { power: 'p.main', data: 'd.fireA' }, feed: 'mag_fwd',
+      needs: { power: 'p.main', data: 'd.fireA' , coolant: 'l.core' }, feed: 'mag_fwd',
       draw: 5, heat: 60, hp: 8.0e6,
     }),
     hp_('hp_pdB', 'POINT DEFENCE B', 'spine', [-8.0, 11.0, -10], {
       weapon: 'repeater', mount: 'small', dir: [-0.35, 0.4, 0.6], arc: 1.2,
-      needs: { power: 'p.main', data: 'd.fireA' }, feed: 'mag_fwd',
+      needs: { power: 'p.main', data: 'd.fireA' , coolant: 'l.core' }, feed: 'mag_fwd',
       draw: 5, heat: 60, hp: 8.0e6,
     }),
+    // Dorsal, and it has to be able to bear. Aimed up and AFT it sat 135
+    // degrees off the bow with a 75 degree arc, so sixty degrees of sky
+    // separated it from the boresight and it could not reach anything the ship
+    // was pointing at — a gun that fired into empty space every time the
+    // repeater group was triggered. Up and FORWARD it covers the boresight
+    // with thirty degrees to spare and still sweeps back past the beam.
     hp_('hp_pdC', 'POINT DEFENCE C', 'engineering', [0, 11.0, 14], {
-      weapon: 'repeater', mount: 'small', dir: [0, 0.5, -0.5], arc: 1.3,
-      needs: { power: 'p.main', data: 'd.fireA' }, feed: 'mag_bLA',
+      weapon: 'repeater', mount: 'small', dir: [0, 0.6, 0.6], arc: 1.3,
+      needs: { power: 'p.main', data: 'd.fireA' , coolant: 'l.aft' }, feed: 'mag_bLA',
       draw: 5, heat: 60, hp: 8.0e6,
     }),
   ],
@@ -1168,7 +1311,7 @@ const BASTION = {
     }),
     mod('sensor', 'sensor', 'TARGETING MAST', 'prow', [0, 4.4, 3.5], {
       half: [5.6, 3.8, 9.5], hp: 2.6e7, vuln: 1.8, sys: 'COMPUTE',
-      needs: { power: 'p.fwd', data: 'd.main' }, draw: 44, priority: 7, heat: 60,
+      needs: { power: 'p.fwd', data: 'd.main' , coolant: 'l.fwd' }, draw: 44, priority: 7, heat: 60,
     }),
     cond('c_data_main', 'data', 'src.computer', 'd.main', 'citadel', [7, -4, -4], {
       label: 'AVIONICS BUS', hp: 3.4e6, vuln: 2.6,
@@ -1192,6 +1335,27 @@ const BASTION = {
     }),
     cond('c_data_eng', 'data', 'd.main', 'd.eng', 'engineering', [-12, 12, -18], {
       label: 'DAMAGE CONTROL BUS', hp: 3.0e6, vuln: 2.6,
+    }),
+
+    // Casualty routing. The power ring was already right; the other two
+    // networks were trees hanging off it.
+    tie('c_tie_citadel', 'power', 'p.ring', 'p.citadel', 'citadel', [6, -6, -12], {
+      label: 'CITADEL ALTERNATE', cap: 0.5,
+    }),
+    tie('c_tie_fire', 'data', 'd.fireR', 'd.fireL', 'spine', [0, 14, 10], {
+      label: 'DIRECTOR CROSS-TIE', cap: 0.6,
+    }),
+    tie('c_tie_eng', 'data', 'd.fireR', 'd.eng', 'engineering', [12, 12, -18], {
+      label: 'DC ALTERNATE', cap: 0.5,
+    }),
+    tie('l_tie_core', 'coolant', 'l.core', 'l.aft', 'engineering', [0, -14, -18], {
+      label: 'MAIN CROSS-CONNECT', cap: 0.55, leak: 0.1,
+    }),
+    tie('l_tie_fwd', 'coolant', 'l.aft', 'l.fwd', 'magdeck', [0, -6, 0], {
+      label: 'FORWARD CROSS-CONNECT', cap: 0.5, leak: 0.1,
+    }),
+    tie('l_tie_bat', 'coolant', 'l.batF', 'l.batA', 'coredeck', [8, -6, 12], {
+      label: 'BATTERY CROSS-CONNECT', cap: 0.5, leak: 0.1,
     }),
 
     mod('shieldgen', 'shieldGen', 'PRIMARY PROJECTOR', 'spine', [0, 8, 8], {
@@ -1267,6 +1431,26 @@ const BASTION = {
     mod('rad_RA', 'radiator', 'STBD RADIATOR AFT', 'batteryRA', [2.4, 2.9, -3.0], {
       half: [5.2, 0.7, 14.0], hp: 2.2e7, vuln: 1.6, sys: 'THERMAL',
       extra: { reject: 0.25 },
+    }),
+    // A dreadnought makes nearly twice the heat its four wing panels can reject
+    // — it settled at 110 C and 80% of rating parked and undamaged. Spread fore
+    // and aft, dorsal and keel, so no single attack angle takes the whole heat
+    // rejection system with it.
+    mod('rad_D1', 'radiator', 'DORSAL RADIATOR FWD', 'spine', [0, 15, -8], {
+      half: [8.0, 0.7, 12.0], hp: 2.0e7, vuln: 1.6, sys: 'THERMAL',
+      extra: { reject: 0.22 },
+    }),
+    mod('rad_D2', 'radiator', 'DORSAL RADIATOR AFT', 'engineering', [0, 15, -10], {
+      half: [8.0, 0.7, 14.0], hp: 2.0e7, vuln: 1.6, sys: 'THERMAL',
+      extra: { reject: 0.22 },
+    }),
+    mod('rad_V1', 'radiator', 'KEEL RADIATOR FWD', 'magdeck', [0, -6, -6], {
+      half: [8.0, 0.7, 14.0], hp: 2.0e7, vuln: 1.6, sys: 'THERMAL',
+      extra: { reject: 0.22 },
+    }),
+    mod('rad_V2', 'radiator', 'KEEL RADIATOR AFT', 'reactorroom', [0, -14, 0], {
+      half: [8.0, 0.7, 14.0], hp: 2.0e7, vuln: 1.6, sys: 'THERMAL',
+      extra: { reject: 0.22 },
     }),
     cond('l_core', 'coolant', 'src.pump', 'l.core', 'reactorroom', [12, -9, 12], {
       label: 'CORE LOOP', hp: 5.0e6, leak: 0.14,
@@ -1356,7 +1540,7 @@ const BASTION = {
     }),
     hp_('hp_tor', 'TORPEDO TUBES', 'magdeck', [0, -6, 18], {
       weapon: 'torpedo', mount: 'large', dir: [0, -0.03, 1], arc: 0.22,
-      needs: { power: 'p.fwd', data: 'd.main' }, feed: 'mag_tor',
+      needs: { power: 'p.fwd', data: 'd.main' , coolant: 'l.core' }, feed: 'mag_tor',
       draw: 16, heat: 60, hp: 4.0e7,
     }),
     hp_('hp_ion', 'ION PROJECTOR', 'prow', [0, -9, 14], {
@@ -1366,17 +1550,18 @@ const BASTION = {
     }),
     hp_('hp_pdA', 'POINT DEFENCE A', 'spine', [12, 16, -16], {
       weapon: 'repeater', mount: 'small', dir: [0.35, 0.4, 0.6], arc: 1.2,
-      needs: { power: 'p.ring', data: 'd.main' }, feed: 'mag_fwd',
+      needs: { power: 'p.ring', data: 'd.main', coolant: 'l.core' }, feed: 'mag_fwd',
       draw: 8, heat: 80, hp: 1.6e7,
     }),
     hp_('hp_pdB', 'POINT DEFENCE B', 'spine', [-12, 16, -16], {
       weapon: 'repeater', mount: 'small', dir: [-0.35, 0.4, 0.6], arc: 1.2,
-      needs: { power: 'p.ring', data: 'd.main' }, feed: 'mag_fwd',
+      needs: { power: 'p.ring', data: 'd.main', coolant: 'l.core' }, feed: 'mag_fwd',
       draw: 8, heat: 80, hp: 1.6e7,
     }),
+    // Up and forward, for the reason given on the MERIDIAN's.
     hp_('hp_pdC', 'POINT DEFENCE C', 'engineering', [0, 16, 22], {
-      weapon: 'repeater', mount: 'small', dir: [0, 0.5, -0.5], arc: 1.3,
-      needs: { power: 'p.ring', data: 'd.main' }, feed: 'mag_bLA',
+      weapon: 'repeater', mount: 'small', dir: [0, 0.6, 0.6], arc: 1.3,
+      needs: { power: 'p.ring', data: 'd.main', coolant: 'l.aft' }, feed: 'mag_bLA',
       draw: 8, heat: 80, hp: 1.6e7,
     }),
   ],
@@ -1446,20 +1631,82 @@ function deriveMassProperties(spec) {
  * permanently unprotected. Since losing the drives is most of what ends a ship,
  * that one geometry error decided nearly every engagement in the game.
  *
- * `fit` is the uniform scale that pulls the furthest compartment CORNER onto the
- * surface. Matching the per-axis extents alone is not enough: an ellipsoid whose
+ * `fit` is the uniform scale that pulls the furthest CORNER onto the surface.
+ * Matching the per-axis extents alone is not enough: an ellipsoid whose
  * semi-axes equal a box's half-extents does not contain that box's corners.
+ *
+ * The compartment boxes are no longer the whole ship. Every hardpoint now
+ * carries modelled hardware that stands ON the plating and swings a barrel
+ * around above it, and on the HALBERD the dorsal driver's muzzle came out two
+ * per cent OUTSIDE the bubble derived from the boxes alone — a turret sitting
+ * beyond its own ship's field, which the ray test would happily let a round
+ * reach without ever touching the shield. So the guns are enclosed too.
  */
 const SHIELD_MARGIN = 1.04;
-function shieldRadii(spec, com) {
+
+/**
+ * How big a hull's guns are relative to the kit's `medium` fitting. Derived
+ * here rather than in the renderer because the shield extent depends on it:
+ * a dreadnought's main battery is a genuinely bigger machine than a picket's.
+ * Clamped at both ends — unclamped, the SABRE wears jewellery and the BASTION
+ * wears buildings. This is the knob to turn if the guns read wrong in flight.
+ */
+function gunScaleFor(radius) {
+  return Math.min(3.0, Math.max(0.85, radius / 60));
+}
+
+/**
+ * Every hardpoint as the volume its hardware actually sweeps.
+ *
+ * The trunnion is seated on the plating by the same `mountFrame` the renderer
+ * uses, and the muzzle sits `reach` metres from it somewhere in the cone the
+ * mount can traverse. Bounding that cone rather than the whole sphere around
+ * the trunnion is what keeps this honest: the MERIDIAN's mass driver is a
+ * twenty-seven metre machine on a hull twenty-eight metres tall, so treating
+ * it as free to point anywhere trebles the ship's dorsal shield radius to
+ * enclose a barrel that can only ever be within seventeen degrees of the bow.
+ */
+function hardwareVolumes(spec, gunScale) {
+  const out = [];
+  for (const m of spec.modules) {
+    const w = m.kind === 'hardpoint' ? WEAPONS[m.weapon] : null;
+    if (!w) {
+      continue;
+    }
+    const s = byIdOf(spec, m.section);
+    const frame = mountFrame(m.pos, s.half, m.dir, s.style);
+    const scale = (MOUNTS[m.mount] || 1) * gunScale;
+    const barrel = Math.max(...(MUZZLES[m.weapon] || [[0, 0, 2]])
+      .map((q) => Math.hypot(q[0], q[1], q[2])));
+    const reach = (PIVOTS[mountStyle(w, m.arc)] + barrel) * scale;
+    const len = Math.hypot(m.dir[0], m.dir[1], m.dir[2]) || 1;
+    const pos = [0, 0, 0];
+    const half = [0, 0, 0];
+    for (let k = 0; k < 3; k++) {
+      const rest = m.dir[k] / len;
+      // Closest the muzzle can come to each axis: rotate the rest bearing
+      // toward it by the whole traverse, and no further.
+      const hi = Math.cos(Math.max(0, Math.acos(Math.min(1, Math.max(-1, rest))) - m.arc));
+      const lo = -Math.cos(Math.max(0, Math.acos(Math.min(1, Math.max(-1, -rest))) - m.arc));
+      const seat = s.pos[k] + m.pos[k] + frame.up.getComponent(k) * frame.lift;
+      pos[k] = seat + reach * (hi + lo) * 0.5;
+      half[k] = reach * (hi - lo) * 0.5;
+    }
+    out.push({ pos, half });
+  }
+  return out;
+}
+
+function shieldRadii(spec, com, gunScale) {
+  const vols = [...spec.sections, ...hardwareVolumes(spec, gunScale)];
   const ext = [0, 0, 0];
-  for (const s of spec.sections) {
+  for (const s of vols) {
     for (let k = 0; k < 3; k++) {
       ext[k] = Math.max(ext[k], Math.abs(s.pos[k] - com[k]) + s.half[k]);
     }
   }
   let fit = 1;
-  for (const s of spec.sections) {
+  for (const s of vols) {
     let q = 0;
     for (let k = 0; k < 3; k++) {
       const e = (Math.abs(s.pos[k] - com[k]) + s.half[k]) / ext[k];
@@ -1651,9 +1898,11 @@ function compile(spec) {
   // anything get moved to match what is drawn.
   const { mass, com, inertia } = deriveMassProperties(spec);
 
-  // The field has to actually enclose the ship. Derived, not authored — see
-  // `shieldRadii`.
-  spec.shield.radii = shieldRadii(spec, com);
+  // The field has to actually enclose the ship — hardware included. Derived,
+  // not authored — see `shieldRadii`.
+  const radius = boundingRadius(spec);
+  spec.gunScale = gunScaleFor(radius);
+  spec.shield.radii = shieldRadii(spec, com, spec.gunScale);
 
   // Control authority is DERIVED, never authored. A table says how fast the
   // ship should turn (`pitchRate` etc.) and how long the thrusters should take
@@ -1696,7 +1945,7 @@ function compile(spec) {
     mass,
     com,
     inertia,
-    radius: boundingRadius(spec),
+    radius,
     crewTotal: spec.crew.reduce((a, c) => a + c.size, 0),
     /** Longest dimension, used for the radar blip and range read-outs. */
     length: 2 * Math.max(...spec.sections.map((s) => Math.abs(s.pos[2]) + s.half[2])),

@@ -45,6 +45,51 @@ const COMPUTER_LATCH_C = 128;
 const EXHAUST_SPEED = 260;
 /** Emergency vents open this fraction of a compartment's volume as area. */
 const VENT_AREA_FRAC = 0.004;
+/**
+ * Fraction of a damage-control party's work that goes into structure once the
+ * hull is sealed. Well under one: shoring a buckled frame is the slowest job on
+ * the ship, and it should feel like the difference between a hull you have
+ * patched and a hull you have actually repaired.
+ */
+const FRAME_REPAIR_FRAC = 0.22;
+
+/**
+ * What fraction of its rating a run actually carries, from its condition.
+ *
+ * A conduit used to be a switch: intact or severed, with nothing in between.
+ * That was invisible until the network started carrying a service level, and
+ * then it produced something plainly wrong — `repairModule` clears `destroyed`
+ * on the FIRST joule of work, so a party touching a severed main trunk restored
+ * the whole branch to full service at 0.2% of the cable's health. A cruiser's
+ * forward bus came back one second after being cut, which made the cross-ties
+ * decorative and made cutting anything pointless.
+ *
+ * So a run is a gradient. Nothing until the splice is holding, full only once
+ * the work is properly finished, and a chewed-but-live cable carries less than
+ * a sound one — which is also the honest answer for battle damage, and the
+ * thing that lets a network be degraded rather than only ever on or off.
+ */
+/**
+ * What a shield costs just to stay lit, as a fraction of the projectors' rated
+ * draw and heat. Emitters idling into a standing field is real load — it is not
+ * free — but it is a hotel service, not the main event. Everything above this
+ * is bought by work: re-striking drained facets and channelling what the field
+ * is absorbing.
+ */
+const SHIELD_HOLD_DUTY = 0.25;
+
+/**
+ * Standing losses of a fusion plant carrying no load, as a fraction of its
+ * rated waste heat. You cannot switch a reactor off and leave the ship dark, so
+ * it is never free — it is just not the full number.
+ */
+const REACTOR_IDLE_DUTY = 0.15;
+
+const RUN_DEAD = 0.15;
+const RUN_SOUND = 0.65;
+function runService(m) {
+  return clamp01((m.hp / m.maxHp - RUN_DEAD) / (RUN_SOUND - RUN_DEAD));
+}
 
 /** Atmosphere below this and unsuited crew start taking casualties. */
 export const ATMO_CRITICAL = 0.35;
@@ -250,9 +295,10 @@ export class Systems {
     }
 
     // -- networks ------------------------------------------------------------
+    // Node -> service level, 0..1. See `_tickNetworks`.
     this.online = {};
     for (const net of NETS) {
-      this.online[net] = new Set();
+      this.online[net] = new Map();
     }
 
     // -- power ---------------------------------------------------------------
@@ -726,11 +772,25 @@ export class Systems {
     s.plateHp += applied;
     // Welding closes area, so the rate is in square metres per joule of work.
     s.breachSize = Math.max(0, s.breachSize - (joules / Math.max(s.plateMax, 1)) * 12);
-    if (s.breachSize <= 0.02 && s.plateHp > s.plateMax * 0.25) {
+    if (s.breached && s.breachSize <= 0.02 && s.plateHp > s.plateMax * 0.25) {
       s.breachSize = 0;
       s.breached = false;
       s.venting = false;
       this.events.push({ type: 'patched', section: sectionId });
+    }
+    // Reframing, once the hull is shut. A buckled frame was permanent: nothing
+    // in the game restored `frameHp`, so a compartment that took a heavy hit
+    // stayed twice as slow to move through and counted against integrity for
+    // the rest of the ship's life however many spares were in the lockers. It
+    // is deliberately slow — shoring up structure is the longest job aboard —
+    // but it is a job that finishes, which is what makes a mauled ship worth
+    // nursing rather than writing off.
+    if (!s.breached && s.frameHp < s.frameMax) {
+      s.frameHp = Math.min(s.frameMax, s.frameHp + joules * FRAME_REPAIR_FRAC);
+      if (s.frameBroken && s.frameHp > s.frameMax * 0.30) {
+        s.frameBroken = false;
+        this.events.push({ type: 'reframed', section: sectionId });
+      }
     }
     return applied;
   }
@@ -779,10 +839,21 @@ export class Systems {
   }
 
   /**
-   * One flood-fill per network, seeded from every intact source module and
+   * One widest-path search per network, seeded from every intact source and
    * spreading across every intact conduit. Edges are undirected because a cable
-   * is: that is what makes the BASILISK's power *ring* survive one cut and fail
-   * on the second, without a single line of ring-specific code.
+   * is: that is what makes a power *ring* survive one cut and fail on the
+   * second, without a single line of ring-specific code.
+   *
+   * What a node carries away is a SERVICE LEVEL, not a yes or no. Every run has
+   * a rating — main trunks carry the ship, emergency ties carry a fraction of
+   * it — and a node's level is the best any surviving path can deliver, which
+   * is the smallest rating along that path. Take out the trunk and the branch
+   * does not go dark; it falls back onto the tie and everything on it runs
+   * derated until somebody re-lays the main. That is how a warship is wired,
+   * and it is the difference between "disrupted" and "destroyed".
+   *
+   * `online[net]` stays a Map keyed by node, so every `.has()` in the codebase
+   * still asks the question it always asked; `.get()` is the new answer.
    */
   _tickNetworks() {
     for (const net of NETS) {
@@ -794,9 +865,11 @@ export class Systems {
         // moves no coolant, so its loops are offline even though the pipes are
         // perfectly good — which is why killing power can boil a ship.
         if (src && !src.destroyed && (net === 'power' || src.eff > 0.08)) {
-          reached.add(`src.${srcId}`);
+          reached.set(`src.${srcId}`, 1);
         }
       }
+      // Levels only ever rise and are bounded by the run ratings, so this
+      // settles in a couple of sweeps over a couple of dozen edges.
       let changed = true;
       while (changed) {
         changed = false;
@@ -804,18 +877,38 @@ export class Systems {
           if (c.destroyed || c.def.net !== net) {
             continue;
           }
-          const a = reached.has(c.def.from);
-          const b = reached.has(c.def.to);
-          if (a && !b) {
-            reached.add(c.def.to);
+          const cap = c.def.cap * runService(c);
+          if (cap <= 0) {
+            continue;
+          }
+          const a = reached.get(c.def.from) || 0;
+          const b = reached.get(c.def.to) || 0;
+          const viaA = Math.min(a, cap);
+          const viaB = Math.min(b, cap);
+          if (viaA > b + 1e-6) {
+            reached.set(c.def.to, viaA);
             changed = true;
-          } else if (b && !a) {
-            reached.add(c.def.from);
+          }
+          if (viaB > a + 1e-6) {
+            reached.set(c.def.from, viaB);
             changed = true;
           }
         }
       }
     }
+  }
+
+  /**
+   * Service level reaching a module over one network, 0..1. A module wired to
+   * a node nothing can supply reads 0; one running off an emergency tie reads
+   * whatever that tie is rated for.
+   */
+  netLevel(m, net) {
+    const node = m.def.needs && m.def.needs[net];
+    if (!node) {
+      return 1;
+    }
+    return this.online[net].get(node) || 0;
   }
 
   /** True if a module has every network it declares a dependency on. */
@@ -834,6 +927,7 @@ export class Systems {
   _tickPower(dt) {
     // Supply: every intact reactor, derated by its own health and heat.
     let supply = 0;
+    let rated = 0;
     for (const m of this.modules.values()) {
       if (m.kind !== 'reactor' || m.destroyed || m.breached || m.detonated) {
         continue;
@@ -841,6 +935,7 @@ export class Systems {
       const health = clamp01(m.hp / m.maxHp);
       const heat = 1 - clamp01((m.temp - DERATE_TEMP_C) / (TRIP_TEMP_C - DERATE_TEMP_C)) * 0.8;
       m.eff = clamp01(health * heat);
+      rated += m.def.output;
       supply += m.def.output * m.eff;
     }
     this.supply = supply;
@@ -868,10 +963,22 @@ export class Systems {
 
     // Shed lowest priority first until the budget closes. The capacitor covers
     // a transient overdraw; a sustained one starts switching things off.
-    let deficit = demand - supply;
+    //
+    // `covered` is the honest question for bus voltage: did anything actually
+    // go unsupplied this tick? Not "is demand above the reactor's steady
+    // output", which is what the headroom term below used to ask. Those are
+    // different questions and conflating them meant every machine aboard
+    // quietly derated the moment the drives lit — a burn is a 150 MW transient
+    // the capacitor is there to absorb, and while it is absorbing it the bus is
+    // at voltage. The visible symptom was the sensor array losing reach
+    // whenever the engines were used, which is not a thing that should happen
+    // to a ship with a charged capacitor bank.
+    const deficit = demand - supply;
+    let covered = true;
     if (deficit > 0) {
       const drawn = Math.min(this.capStore, deficit * dt);
       this.capStore -= drawn;
+      covered = drawn >= deficit * dt - 1e-9;
       if (this.capStore <= 1e-6) {
         consumers.sort((a, b) => a.def.priority - b.def.priority);
         let shedTotal = 0;
@@ -905,7 +1012,27 @@ export class Systems {
     if (this.brownout > 0) {
       this.brownout = Math.max(0, this.brownout - dt);
     }
-    const headroom = demand > 1e-6 ? clamp01(supply / demand) : 1;
+    // Waste heat follows LOAD. `heatIn` reads `m.duty` and falls back to `m.eff`
+    // when a module declares none — and for a reactor `eff` is its CONDITION,
+    // not how hard it is working — so every intact plant made its full rated
+    // heat forever, and a cruiser drawing 73 MW cooked exactly as hard as one
+    // drawing 770.
+    //
+    // Measured against RATED output rather than against `supply`. Dividing by
+    // the derated figure is a positive feedback loop — a hot plant supplies
+    // less, which reads as a higher duty, which makes more heat — and it ran
+    // the two big hulls down to half output with every projector shed. What a
+    // plant is physically producing is `min(demand, supply)`; what it was built
+    // for does not change when it gets hot.
+    const output = Math.min(demand, supply);
+    const loadFactor = rated > 1e-6 ? clamp01(output / rated) : 0;
+    for (const m of this.modules.values()) {
+      if (m.kind === 'reactor') {
+        m.duty = REACTOR_IDLE_DUTY + (1 - REACTOR_IDLE_DUTY) * loadFactor;
+      }
+    }
+
+    const headroom = covered || demand <= 1e-6 ? 1 : clamp01(supply / demand);
     const target = (this.brownout > 0 ? 0.35 : 1) * lerp(0.55, 1, headroom);
     this.busQuality = lerp(this.busQuality, target, 1 - Math.exp(-5 * dt));
   }
@@ -1059,13 +1186,35 @@ export class Systems {
 
     // Radiator capacity is a ship-wide pool: lose a panel and every loop cools
     // worse, which is the honest reading of a shared heat-rejection system.
+    //
+    // Two quantities out of one sweep, because they answer different questions.
+    // `rejectCapacity` is ABSOLUTE area and drives how fast the loops shed —
+    // bolt more panels on and the ship genuinely runs cooler. `rejectFraction`
+    // is how much of the DESIGNED complement is still working, and that is what
+    // shield dissipation is really about: "strip a ship's radiators and its
+    // shields saturate" is a statement about losing them, not about how many it
+    // was built with.
+    //
+    // Every hull happened to author its panels to a total of exactly 1.0, so
+    // the absolute figure doubled as the fraction and the two uses were
+    // indistinguishable — until the MERIDIAN and BASTION needed real panels
+    // added to hold thermal equilibrium. That took the dreadnought's total to
+    // 1.88 and, through this one number, very nearly doubled its shield
+    // dissipation: its fore facet went from saturating under four lances in
+    // 7.5 seconds to surviving four hundred. Cooling is not a shield buff.
     let reject = 0;
+    let ratedReject = 0;
     for (const m of this.modules.values()) {
-      if (m.kind === 'radiator' && !m.destroyed) {
+      if (m.kind !== 'radiator') {
+        continue;
+      }
+      ratedReject += m.def.reject;
+      if (!m.destroyed) {
         reject += m.def.reject * clamp01(m.hp / m.maxHp);
       }
     }
     this.rejectCapacity = reject;
+    this.rejectFraction = ratedReject > 1e-9 ? reject / ratedReject : 0;
 
     for (const m of this.modules.values()) {
       if (m.destroyed) {
@@ -1075,7 +1224,9 @@ export class Systems {
       }
       const node = m.def.needs && m.def.needs.coolant;
       const loop = node ? this.loops.get(node) : null;
-      const loopUp = !!loop && this.online.coolant.has(node);
+      // Flow, not merely connectivity: a loop fed through a cross-connect
+      // circulates at whatever that tie is rated for.
+      const flow = loop ? (this.online.coolant.get(node) || 0) : 0;
       // Heat in: duty-proportional, so a drive at 20 % throttle runs cool.
       const heatIn = m.def.heat * (m.duty !== undefined ? m.duty : m.eff) + m.heatAcc;
       m.heatAcc = 0;
@@ -1087,7 +1238,7 @@ export class Systems {
       // big ship". Losing flow costs a module its exchanger, not its radiator,
       // which is why cutting a pipe cooks one system and not the whole ship.
       const exchanger = clamp(m.def.heat * 0.00225, 0.18, 2.5);
-      const coupling = loop ? exchanger * (loopUp ? 1 : 0.12) * loop.level : 0.05;
+      const coupling = loop ? exchanger * (0.12 + 0.88 * flow) * loop.level : 0.05;
       const toLoop = loop ? (m.temp - loop.temp) * coupling : 0;
       const toHull = (m.temp - AMBIENT_C) * 0.035;
       if (loop) {
@@ -1097,8 +1248,9 @@ export class Systems {
     }
 
     for (const loop of this.loops.values()) {
-      const up = this.online.coolant.has(loop.id);
-      const out = (loop.temp - AMBIENT_C) * (0.35 + reject * 1.5) * loop.level * (up ? 1 : 0.15);
+      const up = this.online.coolant.get(loop.id) || 0;
+      const out = (loop.temp - AMBIENT_C) * (0.35 + reject * 1.5) * loop.level
+        * (0.15 + 0.85 * up);
       loop.temp = clamp(loop.temp + ((loop.heatIn - out) / loop.capacity) * dt * 1.4, AMBIENT_C, 900);
       if (loop.level <= 0.001) {
         // An empty loop carries nothing; it just sheds to the hull.
@@ -1133,7 +1285,11 @@ export class Systems {
       const health = clamp01(m.hp / m.maxHp);
       const heat = 1 - clamp01((m.temp - DERATE_TEMP_C) / (TRIP_TEMP_C - DERATE_TEMP_C)) * 0.85;
       const volts = m.def.draw > 0 ? this.busQuality : 1;
-      m.eff = clamp01(health * heat * volts);
+      // What its feeder can actually deliver. A module running off an emergency
+      // tie rather than its main trunk works, and works badly — which is the
+      // whole point of having the tie.
+      const feed = this.netLevel(m, 'power');
+      m.eff = clamp01(health * heat * volts * feed);
     }
 
     // The computer cooks itself if its loop boils — a real alternative to
@@ -1173,8 +1329,11 @@ export class Systems {
     // is the interesting coupling: strip a ship's radiators and its shields
     // saturate after a fraction of the punishment they used to absorb.
     const cap = this.hull.shield.capacity;
+    // Fraction, not absolute area — see `rejectFraction`. A hull's dissipation
+    // is set by its own shield capacity and by how much of its heat-rejection
+    // system survives, never by how many panels its designer chose to fit.
     const dissipTotal = (cap * DISSIPATION_BASE_FRAC
-      + (this.rejectCapacity || 0) * cap * DISSIPATION_PER_RADIATOR_FRAC) * clamp01(gen);
+      + (this.rejectFraction || 0) * cap * DISSIPATION_PER_RADIATOR_FRAC) * clamp01(gen);
     this.shield.dissipation = dissipTotal;
     const perFacet = dissipTotal / facets.length;
     let shedTotal = 0;
@@ -1239,7 +1398,8 @@ export class Systems {
     // for coming back up, and stays dead for the rest of the engagement.
     // Re-striking from nothing is slower than topping up, and an emitter still
     // full of heat cannot start at all.
-    let budget = this.hull.shield.regen * clamp01(gen) * dt;
+    const budget0 = this.hull.shield.regen * clamp01(gen) * dt;
+    let budget = budget0;
     const live = facets.filter((f) => f.charge < f.max
       && (!f.down || f.load < f.loadMax * 0.45));
     if (live.length > 0 && budget > 0) {
@@ -1257,17 +1417,52 @@ export class Systems {
       }
     }
 
-    // Bill the power system for both jobs. Holding a field costs by how much
-    // field you are holding, which is why a collapsed shield stops being a
-    // load and a healthy one is the biggest single draw aboard.
-    const held = facets.reduce((a, f) => a + f.charge, 0)
-      / Math.max(facets.length * Math.max(target, 1), 1e-9);
-    const rechargeMW = ((this.hull.shield.regen * clamp01(gen)) / RECHARGE_EFF) * 1e-6;
+    // Bill the power system, and the coolant loops, for WORK — not for standing
+    // there with the field lit.
+    //
+    // The old model charged by how much field you were holding, so a full,
+    // quiet, undamaged shield was the most expensive thing on the ship: 407 MW
+    // of a cruiser's 770 MW rating, forever, plus the entire recharge bill
+    // whether or not a single joule was actually being put back. The projectors
+    // also declare the largest heat load aboard — 1360 units on the MERIDIAN,
+    // more than both reactors — and nothing scaled it, because `shieldGen` is
+    // not a duty kind and `heatIn` therefore fell back to `eff`.
+    //
+    // Together those meant an undamaged cruiser parked with its shields up
+    // could not hold a steady state: it settled at 98 C, derated its own
+    // reactors to two thirds of rating, and shed the amplifiers that set its
+    // shield ceiling — silently, because charge and ceiling fall together and
+    // the HUD reads their ratio.
+    //
+    // Maintaining status is cheap now. WORKING is what costs: pulling a drained
+    // facet back up, and channelling what the emitters are absorbing. So the
+    // strain arrives when weapons, drives and a shield under fire compete for
+    // the same plant, which is the moment it should.
+    const deficit = 1 - clamp01(facets.reduce((a, f) => a + f.charge, 0)
+      / Math.max(facets.length * Math.max(target, 1), 1e-9));
+    const channelling = this.shieldLoadFraction();
+    const work = clamp01(Math.max(deficit, channelling));
+    const duty = SHIELD_HOLD_DUTY + (1 - SHIELD_HOLD_DUTY) * work;
+    // Only what the recharge pool actually spent this tick, so a topped-up
+    // field pays nothing to stay topped up.
+    const spent = Math.max(0, budget0 - budget);
+    const rechargeMW = ((spent / Math.max(dt, 1e-6)) / RECHARGE_EFF) * 1e-6;
+    // Split between the projectors that are actually doing the recharging, and
+    // paid by exactly those. Dividing by `projectors.length` while charging
+    // every shieldGen aboard bills the ship more than the pool ever spent — on
+    // a cruiser with one crippled amplifier and two sound ones that is 1.5x the
+    // real cost, and it lands hardest in precisely the degraded states the
+    // graded-service model exists to represent.
+    const inPool = new Set(projectors);
+    const share = projectors.length > 0 ? rechargeMW / projectors.length : 0;
     for (const m of this.modules.values()) {
-      if (m.kind === 'shieldGen') {
-        m.drawNow = m.def.draw * (0.22 + 0.78 * clamp01(held))
-          + (m.destroyed ? 0 : rechargeMW / Math.max(projectors.length, 1));
+      if (m.kind !== 'shieldGen') {
+        continue;
       }
+      // Holding load and waste heat are a property of the fitting being lit;
+      // the recharge bill belongs only to the emitters doing the work.
+      m.duty = duty;
+      m.drawNow = m.def.draw * duty + (inPool.has(m) ? share : 0);
     }
   }
 
@@ -1444,6 +1639,28 @@ export class Systems {
     return max > 0 ? clamp01(charge / max) : 0;
   }
 
+  /**
+   * Charge against the field this hull is RATED for, not against the ceiling it
+   * happens to have left.
+   *
+   * `shieldFraction` divides by the current maximum, and killing a projector
+   * lowers that maximum — so charge and ceiling fall together and the ratio
+   * stays pinned near 1. A ship that had lost the amplifiers setting a third of
+   * its shield still reported a full shield. Anything a player reads to decide
+   * whether to keep taking hits on this side needs the honest denominator.
+   */
+  shieldRated() {
+    const cap = this.hull.shield.capacity;
+    if (!(cap > 0)) {
+      return 0;
+    }
+    let charge = 0;
+    for (const f of Object.values(this.shield.facets)) {
+      charge += f.charge;
+    }
+    return clamp01(charge / cap);
+  }
+
   /** 0..1 how close the emitters are to saturating. The other failure mode. */
   shieldLoadFraction() {
     let load = 0;
@@ -1518,8 +1735,18 @@ export class Systems {
     return this.hullFraction() < 0.18
       || this.integrity < 0.12
       || (this.ship && this.ship.crew.complement < 0.06)
-      // Cold and dark: no plant, no capacitor, nothing to shoot with.
-      || (this.supply <= 0.4 && this.capStore <= this.capMax * 0.02);
+      // Cold and dark: no plant, and nothing the banks can still reach.
+      //
+      // Charge STRANDED behind a dead distribution network is not a capability.
+      // With no source seeded, no node is online, so every consumer fails
+      // `_netsOk`, demand collapses to zero and the capacitor stops draining —
+      // it simply sits there at whatever it held. Nothing can draw on it (a gun
+      // needs `eff`, and `eff` is zero without a live node), so a hull with a
+      // wrecked plant and a half-full bank is finished whatever the meter says.
+      // This used to pass only by luck: the bank happened to be flat already
+      // because the last surviving plant had been running a deficit into it.
+      || (this.supply <= 0.4
+        && (this.online.power.size === 0 || this.capStore <= this.capMax * 0.02));
   }
 
   /**

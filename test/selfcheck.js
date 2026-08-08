@@ -11,13 +11,14 @@ import { HULLS, ENGAGEMENT_RANGE } from '../src/ship/hulls.js';
 import { Systems, ATMO_CRITICAL } from '../src/ship/systems.js';
 import { Crew } from '../src/ship/crew.js';
 import { Body, Autopilot } from '../src/ship/flight.js';
-import { WEAPONS, AMMO } from '../src/weapons/defs.js';
+import { WEAPONS, AMMO, MOUNTS } from '../src/weapons/defs.js';
+import { Ballistics } from '../src/weapons/ballistics.js';
 import { Ship, MOUNT_DEPRESSION } from '../src/ship/ship.js';
 import { Pilot } from '../src/ship/ai.js';
 import { Euler, Quaternion, Vector3, Color } from 'three';
 import { PARTS, MUZZLES, PIVOTS } from '../src/world/kit.js';
 import {
-  mountFrame, partGeometry, shellGeometry, skinFraction, SHELL_STYLES,
+  mountFrame, mountStyle, partGeometry, shellGeometry, skinFraction, SHELL_STYLES,
 } from '../src/world/hardware.js';
 import {
   skyColour, MOODS, Space, CAMERA_NEAR, CAMERA_FAR, STAR_SHELL, SKY_SHELL,
@@ -108,9 +109,23 @@ for (const [id, h] of Object.entries(HULLS)) {
   ok('one of two parallel runs cut: forward bus still live', sys.online.power.has('p.fwd'));
   sys.damageModule('c_keel', 1e12);
   run(sys, 0.2);
-  ok('both runs cut: forward bus dead', !sys.online.power.has('p.fwd'));
-  ok('...and the sensor on that bus is dead with it', sys.get('sensor').eff === 0);
-  ok('...but the aft bus is unaffected', sys.online.power.has('p.main'));
+  // Both mains gone, and the bus does NOT go dark: it falls back through the
+  // bridge alternate and everything on it runs derated. Losing both trunks
+  // used to switch the bow of the ship off — sensors, forward battery, bridge
+  // feed — which is not how anything this size is wired. The cost of the
+  // fallback is capability, not capability-or-nothing.
+  const level = sys.online.power.get('p.fwd') || 0;
+  ok('both mains cut: the forward bus falls back on the tie', level > 0 && level < 1,
+    `level ${level}`);
+  ok('...and the sensor on it is degraded, not dead',
+    sys.get('sensor').eff > 0.1 && sys.get('sensor').eff < 0.9,
+    `eff ${sys.get('sensor').eff.toFixed(2)}`);
+  ok('...but the aft bus is at full service', sys.online.power.get('p.main') === 1);
+  // Cut the tie as well and the bow really is dark. Three runs in three
+  // compartments is a fair price for that.
+  sys.damageModule('c_tie_bridge', 1e12);
+  run(sys, 0.2);
+  ok('...and cutting the tie too finally kills it', !sys.online.power.has('p.fwd'));
 }
 {
   // The BASILISK's ring should survive any single cut and fail on the right pair.
@@ -169,6 +184,99 @@ for (const [id, h] of Object.entries(HULLS)) {
   }
   ok('load shedding is strictly by priority', highestShed <= lowestKept,
     `shed up to ${highestShed}, kept from ${lowestKept}`);
+}
+
+// --- no single run may end a branch -----------------------------------------
+// Cut every conduit in turn and check nothing that needs service loses it.
+// Seventy nodes across the four hulls used to hang off one run each: a cruiser
+// lost its whole port battery, its fire control or its core cooling loop to one
+// round in the right compartment. Runs marked `sole` are the deliberate
+// exceptions — a gun hoist is meant to be the one feed to its own turret, and a
+// picket's single computer is meant to be its weakness.
+{
+  for (const [id, hull] of Object.entries(HULLS)) {
+    const needed = new Set();
+    for (const m of hull.modules) {
+      if (m.needs) {
+        for (const [net, node] of Object.entries(m.needs)) {
+          needed.add(`${net}:${node}`);
+        }
+      }
+    }
+    // Read straight out of the code rather than declared by any module.
+    needed.add('data:d.helm');
+    needed.add('data:d.eng');
+
+    // Settle first, then cut, then re-solve the networks ALONE. Running the
+    // clock after the cut makes this a lottery rather than a measurement: a
+    // severed power run arcs into its own compartment, and on the MERIDIAN the
+    // port feed shares a compartment with the hoist it feeds, so about one run
+    // in five the arc took the hoist too and the assertion failed on a
+    // secondary effect instead of on the topology it exists to check.
+    const served = (cutId) => {
+      const sys = new Systems(hull);
+      run(sys, 0.6);
+      if (cutId) {
+        sys.damageModule(cutId, 1e12);
+      }
+      sys._tickNetworks();
+      return sys.online;
+    };
+    const base = served(null);
+    const orphaned = [];
+    for (const c of hull.modules.filter((m) => m.kind === 'conduit' && !m.sole)) {
+      const after = served(c.id);
+      for (const node of base[c.net].keys()) {
+        const key = `${c.net}:${node}`;
+        if (needed.has(key) && !(after[c.net].get(node) > 0)) {
+          orphaned.push(`${c.id} -> ${key}`);
+        }
+      }
+    }
+    ok(`${id}: no single run isolates anything`, orphaned.length === 0,
+      orphaned.slice(0, 3).join('; '));
+  }
+}
+
+// --- transients are what the capacitor is FOR -------------------------------
+// Bus quality used to sag the moment demand passed the reactor's steady output,
+// regardless of whether anything actually went unsupplied. Since `busQuality`
+// multiplies every powered module's efficiency, that meant lighting the drives
+// quietly derated the entire ship — the visible symptom being the sensor array
+// losing reach whenever the engines were used, on a cruiser with a full
+// capacitor bank. A charged buffer covering a burn IS the bus holding voltage.
+{
+  const sys = fresh();
+  run(sys, 2);
+  const rested = sys.sensorQuality();
+  ok('sensors are at full quality at rest', rested > 0.99, `${rested.toFixed(3)}`);
+  // Everything that draws on demand, at full duty: both drives, every jet and
+  // every gun cycling at once — the heaviest transient the ship can produce.
+  for (let t = 0; t < 3; t += 1 / 60) {
+    for (const m of sys.modules.values()) {
+      if (m.kind === 'thruster' || m.kind === 'rcs' || m.kind === 'hardpoint') {
+        m.duty = 1;
+      }
+    }
+    sys.tick(1 / 60);
+  }
+  ok('a full burn really does outrun the reactor', sys.demand > sys.supply,
+    `${sys.demand.toFixed(1)} MW vs ${sys.supply.toFixed(1)} MW`);
+  ok('but the capacitor is carrying it', sys.capStore > 0);
+  ok('so the sensors keep their reach under thrust',
+    sys.sensorQuality() >= rested - 1e-6, `${sys.sensorQuality().toFixed(3)}`);
+  // Flatten the buffer and the bus is genuinely short: now it should sag.
+  sys.capStore = 0;
+  for (let t = 0; t < 1; t += 1 / 60) {
+    for (const m of sys.modules.values()) {
+      if (m.kind === 'thruster' || m.kind === 'rcs' || m.kind === 'hardpoint') {
+        m.duty = 1;
+      }
+    }
+    sys.tick(1 / 60);
+  }
+  ok('an exhausted capacitor does drop the bus', sys.busQuality < 0.999,
+    `${sys.busQuality.toFixed(3)}`);
 }
 
 // --- the painted sky ----------------------------------------------------------
@@ -527,6 +635,201 @@ for (const [id, h] of Object.entries(HULLS)) {
   ok('unsuited crew will not cross vacuum at all',
     !Number.isFinite(crew._cost('spine', false)));
   ok('suited crew will, slowly', Number.isFinite(crew._cost('spine', true)));
+}
+
+// --- the shield read-out has to be able to report its own damage ------------
+// `shieldFraction` is charge / current max, and killing a projector lowers that
+// max — so charge and ceiling fall together and the ratio stays pinned near 1.
+// A cruiser that had lost the amplifiers setting a third of its shield still
+// read as a completely healthy shield, which made the gauge a player trusts
+// most the one gauge that could not report the damage.
+{
+  const sys = fresh();
+  run(sys, 2);
+  ok('an undamaged shield reads full on both metrics',
+    sys.shieldFraction() > 0.98 && sys.shieldRated() > 0.98);
+
+  sys.damageModule('shieldcap_f', 1e12);
+  sys.damageModule('shieldcap_a', 1e12);
+  run(sys, 25);   // long enough for the facets to top up to the NEW ceiling
+  ok('losing both amplifiers really does cost ceiling',
+    Object.values(sys.shield.facets)[0].max * 6 < HULLS.meridian.shield.capacity * 0.85);
+  ok('the old ratio cannot see it', sys.shieldFraction() > 0.95,
+    `${(sys.shieldFraction() * 100).toFixed(0)}%`);
+  ok('the rated read-out can', sys.shieldRated() < 0.85,
+    `${(sys.shieldRated() * 100).toFixed(0)}%`);
+}
+
+// --- cooling is not a shield buff -------------------------------------------
+// Shield dissipation scales with heat rejection, and heat rejection used to be
+// an absolute figure that every hull happened to author to exactly 1.0 — so it
+// doubled as "fraction of my panels still working" and nobody could tell the
+// two apart. Fitting the MERIDIAN and BASTION the panels they need to hold
+// thermal equilibrium took the dreadnought to 1.88 and, through that one
+// number, took its fore facet from saturating in 7.5 s to surviving 400.
+{
+  for (const [id, hull] of Object.entries(HULLS)) {
+    const sys = new Systems(hull);
+    run(sys, 1);
+    ok(`${id}: a full radiator complement is full, whatever it is made of`,
+      Math.abs(sys.rejectFraction - 1) < 1e-9, `${sys.rejectFraction.toFixed(3)}`);
+    const rads = [...sys.modules.values()].filter((m) => m.kind === 'radiator');
+    sys.damageModule(rads[0].id, 1e12);
+    run(sys, 0.2);
+    ok(`${id}: and losing a panel still costs dissipation`,
+      sys.rejectFraction < 1 && sys.rejectFraction > 0,
+      `${sys.rejectFraction.toFixed(3)}`);
+  }
+}
+
+// --- holding a shield is cheap; working one is not --------------------------
+// Maintaining status should be a hotel service. The strain is meant to arrive
+// when weapons, drives and a shield under fire compete for the same plant.
+//
+// It used to be the opposite: draw scaled with how much charge you were HOLDING
+// and the full recharge bill was levied whether or not anything was recharging,
+// so a full, quiet, undamaged field was the most expensive thing on the ship —
+// 407 MW of a cruiser's 770 MW rating. Projector heat ignored duty entirely.
+// Together those meant a parked, undamaged cruiser derated its own reactors to
+// two thirds of rating and shed the amplifiers that set its shield ceiling.
+{
+  const hull = HULLS.meridian;
+  const rated = hull.modules.filter((m) => m.kind === 'reactor')
+    .reduce((a, m) => a + m.output, 0);
+  const load = (sc) => {
+    const sys = new Systems(hull);
+    for (let i = 0; i < 300 * 60; i++) {
+      for (const m of sys.modules.values()) {
+        if (m.kind === 'thruster' || m.kind === 'rcs') { m.duty = sc.drive; }
+        if (m.kind === 'hardpoint') { m.duty = sc.guns; }
+      }
+      if (sc.incoming) {
+        for (const f of ['fore', 'port', 'dorsal']) {
+          sys.damageShield(f, (WEAPONS.beam.dps / 60) * 0.9, 1 / 60);
+        }
+      }
+      sys.tick(1 / 60);
+    }
+    return sys;
+  };
+
+  const rest = load({ drive: 0, guns: 0, incoming: 0 });
+  ok('holding a full shield is a hotel load, not most of the plant',
+    rest.demand < rated * 0.55, `${rest.demand.toFixed(0)} of ${rated} MW`);
+  ok('...so a parked ship sheds nothing',
+    [...rest.modules.values()].filter((m) => m.shed).length === 0);
+  ok('...and keeps the shield ceiling it paid for',
+    Object.values(rest.shield.facets)[0].max * 6 >= hull.shield.capacity * 0.98);
+
+  // Any ONE of the three is comfortable.
+  for (const [name, sc] of [
+    ['drives', { drive: 1, guns: 0, incoming: 0 }],
+    ['guns', { drive: 0, guns: 1, incoming: 0 }],
+    ['a shield under fire', { drive: 0, guns: 0, incoming: 1 }],
+  ]) {
+    const sys = load(sc);
+    ok(`${name} alone does not brown the ship out`, sys.demand < sys.supply,
+      `${sys.demand.toFixed(0)} vs ${sys.supply.toFixed(0)} MW`);
+  }
+
+  // The recharge bill is split between the projectors DOING the recharging and
+  // paid by exactly those. Dividing by the projector count while charging every
+  // shieldGen aboard bills more than the pool ever spent — measured at 1.5x on
+  // a cruiser with one crippled amplifier and two sound ones, and it lands in
+  // precisely the degraded states the graded-service model exists to model.
+  {
+    const sys = new Systems(hull);
+    run(sys, 2);
+    const dud = sys.get('shieldcap_f');
+    dud.hp = dud.maxHp * 0.005;
+    for (const f of Object.values(sys.shield.facets)) { f.charge = f.max * 0.2; }
+    run(sys, 0.5);
+    const gens = [...sys.modules.values()].filter((m) => m.kind === 'shieldGen');
+    const idle = gens.filter((m) => m.eff <= 0.02);
+    const working = gens.filter((m) => m.eff > 0.02);
+    ok('the crippled projector is out of the pool and the others are in it',
+      idle.length === 1 && working.length >= 1);
+    ok('a projector too far gone to hold field pays no recharge bill',
+      idle.every((m) => Math.abs(m.drawNow - m.def.draw * m.duty) < 1e-9),
+      idle.map((m) => (m.drawNow - m.def.draw * m.duty).toFixed(2)).join(','));
+    ok('...and the working ones are still billed for it',
+      working.every((m) => m.drawNow - m.def.draw * m.duty > 0));
+  }
+
+  // All three together is meant to hurt.
+  const all = load({ drive: 1, guns: 1, incoming: 1 });
+  ok('drives, guns and a shield under fire together DO strain the plant',
+    all.demand > all.supply, `${all.demand.toFixed(0)} vs ${all.supply.toFixed(0)} MW`);
+  ok('...enough to flatten the capacitor and start shedding',
+    all.capStore < all.capMax * 0.05
+      && [...all.modules.values()].filter((m) => m.shed).length > 0);
+}
+
+// --- a vented compartment is still a job ------------------------------------
+// The narrow case, isolated from any cascade: one hole, nothing else wrong, and
+// enough time for the compartment to finish venting before anyone reaches it.
+// The old job filter was `s.breached && s.atmo > 0.03`, so the party stopped
+// coming the moment the air ran out and the hole stayed open forever.
+{
+  const hull = HULLS.meridian;
+  const sys = new Systems(hull);
+  const crew = new Crew(hull, sys);
+  run(sys, 2, crew);
+  sys.punchHole('bowarray', 3);
+  // Let it empty completely before anyone can get there.
+  run(sys, 45, crew);
+  ok('the compartment really did finish venting',
+    sys.section('bowarray').atmo <= ATMO_CRITICAL,
+    `atmo ${sys.section('bowarray').atmo.toFixed(3)}`);
+  run(sys, 240, crew);
+  ok('a fully vented breach still gets welded shut',
+    !sys.section('bowarray').breached,
+    `${sys.section('bowarray').breachSize.toFixed(2)} m2 still open`);
+  run(sys, 120, crew);
+  ok('...and re-pressurises once it is shut', sys.section('bowarray').atmo > 0.5,
+    `atmo ${sys.section('bowarray').atmo.toFixed(2)}`);
+}
+
+// --- damage control does not give up ----------------------------------------
+// A mauled ship with a full crew and full lockers has to be recoverable, or the
+// spares, the parties and the whole repair model are decoration. Two things
+// made it permanent: the patch job was filtered on `atmo > 0.03`, so a
+// compartment that finished venting was never worked on again, and nothing
+// anywhere restored `frameHp`, so a buckled frame was forever.
+{
+  const hull = HULLS.meridian;
+  const sys = new Systems(hull);
+  const crew = new Crew(hull, sys);
+  run(sys, 2, crew);
+  const wreck = ['c_main_batLF', 'c_dorsal', 'rad_LF', 'hp_bLF', 'sensor',
+    'pump_aux', 'l_fwd', 'c_data_fireF', 'thruster_A', 'lifesupport'];
+  for (const id of wreck) {
+    sys.damageModule(id, 1e12, null, null);
+  }
+  sys.punchHole('batteryLF', 6);
+  sys.punchHole('bowarray', 4);
+  sys.damageSection('batteryLF', 6e7, null, null);
+
+  const spares0 = sys.totalSpares();
+  ok('the mauling actually took', [...sys.modules.values()].filter((m) => m.destroyed).length >= 8);
+  ok('...and opened the hull', [...sys.sections.values()].filter((s) => s.breached).length >= 2);
+  const buckled = [...sys.sections.values()].filter((s) => s.frameBroken).length;
+
+  run(sys, 60, crew);
+
+  run(sys, 900, crew);
+  ok('every wrecked module is rebuilt from spares',
+    [...sys.modules.values()].filter((m) => m.destroyed).length === 0,
+    [...sys.modules.values()].filter((m) => m.destroyed).map((m) => m.id).join(', '));
+  ok('every breach is welded shut, vented or not',
+    [...sys.sections.values()].filter((s) => s.breached).length === 0,
+    [...sys.sections.values()].filter((s) => s.breached).map((s) => s.id).join(', '));
+  ok('and a buckled frame is shored back up',
+    buckled === 0 || [...sys.sections.values()].filter((s) => s.frameBroken).length === 0);
+  ok('recovery costs real stock', sys.totalSpares() < spares0 && sys.totalSpares() > 0,
+    `${spares0} -> ${sys.totalSpares()}`);
+  ok('a recovered ship reads as sound again', sys.integrity > 0.95,
+    `${(sys.integrity * 100).toFixed(0)}%`);
 }
 
 // --- capability read-outs ---------------------------------------------------
@@ -1008,6 +1311,127 @@ for (const [id, h] of Object.entries(HULLS)) {
     ok('train and elevation put the bore back on the demanded bearing',
       worst < 1e-9, `worst error ${worst.toExponential(2)}`);
   }
+
+  // Every mount has to be able to point at what the ship is pointing at.
+  //
+  // The MERIDIAN and BASTION each carried a dorsal repeater aimed up and AFT:
+  // 135 degrees off the bow with a 75 degree traverse, so sixty degrees of sky
+  // stood between it and the boresight and it could not engage anything the
+  // reticle was on. Triggering the point-defence group fired one third of it
+  // into empty space, every time.
+  {
+    let worst = -1e9;
+    let worstId = '';
+    for (const hull of Object.values(HULLS)) {
+      for (const def of hull.hardpoints) {
+        const off = Math.acos(new Vector3(...def.dir).normalize().z);
+        if (off - def.arc > worst) {
+          worst = off - def.arc;
+          worstId = `${hull.id}/${def.id}`;
+        }
+      }
+    }
+    ok('every mount can traverse onto the boresight',
+      worst <= 0, `${worstId} falls ${(worst * 57.3).toFixed(1)}deg short`);
+  }
+
+  // The field has to enclose the HARDWARE, not just the compartments. A gun is
+  // a twenty-seven metre machine on a hull twenty-eight metres tall and it
+  // swings; before the shield was derived from the mounts, the HALBERD's dorsal
+  // driver stood two per cent outside its own ship's bubble, where a round
+  // could reach it without the field ever getting a say.
+  {
+    let worst = 0;
+    let worstId = '';
+    for (const hull of Object.values(HULLS)) {
+      const r = hull.shield.radii;
+      for (const def of hull.hardpoints) {
+        const s = hull.sectionById[def.section];
+        const f = mountFrame(def.pos, s.half, def.dir, s.style);
+        const scale = (MOUNTS[def.mount] || 1) * hull.gunScale;
+        const reach = (PIVOTS[mountStyle(WEAPONS[def.weapon], def.arc)]
+          + Math.max(...MUZZLES[def.weapon].map((m) => Math.hypot(m[0], m[1], m[2])))) * scale;
+        const seat = new Vector3(
+          s.pos[0] + def.pos[0], s.pos[1] + def.pos[1], s.pos[2] + def.pos[2],
+        ).addScaledVector(f.up, f.lift).sub(new Vector3(...hull.com));
+        // Sample the traverse: the rest bearing and the rim of the cone.
+        const rest = new Vector3(...def.dir).normalize();
+        const side = new Vector3().crossVectors(rest, f.up).normalize();
+        const other = new Vector3().crossVectors(side, rest);
+        for (let i = 0; i < 16; i++) {
+          const th = (i / 16) * Math.PI * 2;
+          const tip = seat.clone().addScaledVector(
+            rest.clone().multiplyScalar(Math.cos(def.arc))
+              .addScaledVector(side, Math.sin(def.arc) * Math.cos(th))
+              .addScaledVector(other, Math.sin(def.arc) * Math.sin(th)),
+            reach,
+          );
+          const q = Math.hypot(tip.x / r[0], tip.y / r[1], tip.z / r[2]);
+          if (q > worst) {
+            worst = q;
+            worstId = `${hull.id}/${def.id}`;
+          }
+        }
+      }
+    }
+    ok('every muzzle stays inside its own shield through the whole traverse',
+      worst <= 1, `${worstId} reaches ${worst.toFixed(3)}x the field radius`);
+  }
+}
+
+// --- point defence actually defends -----------------------------------------
+// The repeater's whole stated job is shredding incoming torpedoes, and it could
+// not: nothing tested a round against anything but ships, so a warhead once
+// launched always arrived and the PD mounts were three turrets that did nothing
+// a broadside could not do better.
+{
+  const blasts = [];
+  const scene = { add() {}, remove() {} };
+  const game = {
+    scene,
+    ships: [],
+    fx: { smokePuff() {}, explosion() {} },
+    audio: { boom() {} },
+    explode(pos, opts) { blasts.push({ pos: pos.clone(), owner: opts.owner }); },
+  };
+  const ball = new Ballistics(game);
+  const gunner = { name: 'GUNNER' };
+  const launcher = { name: 'LAUNCHER' };
+  const fire = (from, dir, dist) => ball.resolvePath(
+    from, dir, dist,
+    { energy: 1e6, ap: 1, dwell: 1e-3, dump: 0, owner: gunner, caliber: 'bolt', impulse: 10 },
+  );
+  const launch = () => {
+    ball.missiles.length = 0;
+    ball.spawnMissile(launcher, new Vector3(0, 0, 1000), new Vector3(0, 0, -1),
+      new Vector3(), WEAPONS.torpedo, null);
+    ball.missiles[0].armT = 0;   // out of the tube and live
+  };
+
+  launch();
+  const res = fire(new Vector3(0, 0, 0), new Vector3(0, 0, 1), 2000);
+  ok('a round through a torpedo sets it off', ball.missiles.length === 0);
+  ok('...and is spent doing it', res.stopped === true);
+  ok('...and the kill is credited to whoever shot it down',
+    blasts.length === 1 && blasts[0].owner === gunner);
+
+  // Near misses miss. A repeater must not sweep ordnance out of the sky from
+  // fifty metres away, or point defence stops being a matter of laying the gun.
+  launch();
+  fire(new Vector3(50, 0, 0), new Vector3(0, 0, 1), 2000);
+  ok('a round fifty metres wide of it does not', ball.missiles.length === 1);
+
+  // A launcher cannot detonate its own salvo by firing through it.
+  ball.missiles[0].owner = gunner;
+  fire(new Vector3(0, 0, 0), new Vector3(0, 0, 1), 2000);
+  ok('and you cannot shoot down your own ordnance', ball.missiles.length === 1);
+
+  // Fragments do not: sympathetic detonation would splice the missile array
+  // from inside the loop that is already walking it.
+  ball.missiles[0].owner = launcher;
+  ball.resolvePath(new Vector3(0, 0, 0), new Vector3(0, 0, 1), 2000,
+    { energy: 1e6, ap: 1, dwell: 1e-3, owner: gunner, caliber: 'shrapnel', impulse: 10 });
+  ok('a blast fan leaves other warheads alone', ball.missiles.length === 1);
 }
 
 // --- report -----------------------------------------------------------------

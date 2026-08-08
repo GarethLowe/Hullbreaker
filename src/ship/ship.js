@@ -171,16 +171,10 @@ export class Ship {
     const assets = this.game.assets;
     const tint = tintOverride !== undefined ? tintOverride : this.hull.tint;
     this.tint = tint;
-    /**
-     * How big this ship's guns are, relative to the kit's `medium` fitting.
-     *
-     * A dreadnought's main battery is genuinely a bigger machine than a
-     * picket's, not the same turret at the same size, so hardware scales with
-     * the hull it is bolted to as well as with the MOUNTS class. Clamped at
-     * both ends: unclamped, the SABRE wears jewellery and the BASTION wears
-     * buildings. This is the knob to turn if the guns read wrong in flight.
-     */
-    this.gunScale = clamp(this.hull.radius / 60, 0.85, 3.0);
+    // Derived in `compile()`, not here: the shield extent has to enclose the
+    // hardware, so how big the guns are is a fact about the hull rather than
+    // about the renderer. See `gunScaleFor` in hulls.js.
+    this.gunScale = this.hull.gunScale;
     this.group = new THREE.Group();
     this.sectionMeshes = new Map();
 
@@ -804,29 +798,48 @@ export class Ship {
   // -- weapons ---------------------------------------------------------------
 
   /**
-   * Where a mount is pointing this tick. Turrets with a live fire-control link
-   * lead the target; without one they fall back to their rest bearing, which is
-   * what "the gun still works but nothing is telling it where to shoot" looks
-   * like from the outside.
+   * Where a mount is pointing this tick.
+   *
+   * Three cases, and the middle one was missing. A mount with a fire-control
+   * link and a target leads it. A mount with a link and NO target lays on the
+   * boresight — the reticle — because that is where the ship is asking it to
+   * shoot. Only a mount that has lost its link (or cannot slew at all) falls
+   * back to the bearing the tables bolted it down at, which is what "the gun
+   * still works but nothing is telling it where to shoot" should look like.
+   *
+   * Reverting to the rest bearing whenever nothing was locked is what made
+   * half the arsenal feel broken: the MERIDIAN's lances sit five degrees out
+   * to port and starboard, the broadsides twelve, the point defence forty, so
+   * with no lock the reticle described exactly one gun on the ship and every
+   * other mount threw its rounds off into open space at an angle. The mounts
+   * could always traverse; nothing was ever asking them to.
    */
   _aimMount(mount, target, dt) {
     const rest = _v.copy(mount.rest).applyQuaternion(this.body.quat);
-    if (!target || !mount.traverses || !this.sys.hasData(mount.mod)) {
+    const laid = mount.traverses && this.sys.hasData(mount.mod);
+    if (!laid) {
       mount.aim.lerp(rest, 1 - Math.exp(-6 * dt)).normalize();
       this._clampToMount(mount);
       return;
     }
-    this.localToWorld(mount.origin, _o);
-    _v2.copy(target.position).sub(_o);
     const w = mount.weapon;
-    if (w.muzzleVel) {
-      _d.copy(target.velocity).sub(this.velocity);
-      const t = interceptTime(_v2, _d, w.muzzleVel);
-      if (t !== null && t < 6) {
-        _v2.addScaledVector(_d, t);
+    if (!target) {
+      // No lock: converge on where the nose is pointing. The mounts are metres
+      // apart on a hull kilometres from anything, so parallel bearings and a
+      // convergence point are the same answer.
+      this.forward(_v2);
+    } else {
+      this.localToWorld(mount.origin, _o);
+      _v2.copy(target.position).sub(_o);
+      if (w.muzzleVel) {
+        _d.copy(target.velocity).sub(this.velocity);
+        const t = interceptTime(_v2, _d, w.muzzleVel);
+        if (t !== null && t < 6) {
+          _v2.addScaledVector(_d, t);
+        }
       }
+      _v2.normalize();
     }
-    _v2.normalize();
 
     // Lay error. The gun is only as good as the people laying it, and until now
     // it was not: the hull tables, the README and the crew model all say an
@@ -929,6 +942,46 @@ export class Ship {
       .addScaledVector(mount.aim, m[2] * s)
       .addScaledVector(_mzR, m[0] * s)
       .addScaledVector(_mzU, m[1] * s);
+  }
+
+  /**
+   * Why a mount is not going to shoot, or null if it is ready.
+   *
+   * One place that answers the question, because the reasons a gun is silent
+   * are spread across four different systems — the module is wrecked, its bus
+   * is dead, its coolant loop tripped it, its magazine is empty, its
+   * fire-control run has been cut, or it simply has not finished cycling. From
+   * the cockpit those are indistinguishable without being told, and "why is
+   * nothing happening when I hold the trigger" is not a puzzle worth setting.
+   */
+  mountFault(mount) {
+    const mod = mount.mod;
+    if (mod.destroyed) {
+      return 'WRECKED';
+    }
+    if (mod.tripped) {
+      return 'OVERHEAT';
+    }
+    if (mod.eff <= 0.12) {
+      return 'NO POWER';
+    }
+    if (!this.sys.hasData(mod)) {
+      return 'NO LINK';
+    }
+    const need = mount.weapon.ammo;
+    if (need) {
+      const mag = this.sys.get(mount.def.feed);
+      if (!mag || mag.destroyed || mag.rounds < need) {
+        return 'NO AMMO';
+      }
+    }
+    if (!this._canDraw(mount.weapon.draw)) {
+      return 'NO CHARGE';
+    }
+    if (mount.cool > 0) {
+      return 'CYCLING';
+    }
+    return null;
   }
 
   /** True if this mount is pointing close enough to be worth firing. */

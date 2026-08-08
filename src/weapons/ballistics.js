@@ -20,6 +20,18 @@ import { MATERIALS } from '../ship/hulls.js';
 import { clamp01, rand, randomDirection, coneDirection } from '../core/mathx.js';
 
 const MAX_TRACERS = 900;
+/**
+ * How close a round has to pass a torpedo to kill it, metres.
+ *
+ * Generous on purpose, and it is the number that makes point defence a system
+ * rather than decoration. A torpedo body is about three metres across; a
+ * repeater lays rounds with 6 mrad of dispersion, which is twelve metres of
+ * scatter at two kilometres, so a hull-sized intercept radius would mean the
+ * PD mounts essentially never connected and every warhead launched at you
+ * arrived. Nine metres stands for the round's own fragmentation and the
+ * seeker's fragility: hit near it and it does not survive to run.
+ */
+const INTERCEPT_RADIUS = 9;
 /** Obliquity floor — a perfectly grazing hit would otherwise cost infinity. */
 const MIN_COS = 0.16;
 /** Below this cosine (~70 deg off normal) a non-penetrating slug deflects. */
@@ -318,18 +330,58 @@ export class Ballistics {
         }
       }
       if (hitAt || m.fuse <= 0) {
-        this.game.explode(hitAt || m.pos.clone(), {
-          radius: w.blast.radius,
-          energy: w.blast.energy,
-          shrapnel: w.blast.shrapnel,
-          shrapnelEnergy: w.blast.shrapnelEnergy,
-          owner: m.owner,
-          incendiary: true,
-        });
-        this.game.scene.remove(m.mesh);
-        this.missiles.splice(i, 1);
+        this.detonate(m, m.owner, hitAt);
       }
     }
+  }
+
+  /**
+   * The nearest live torpedo whose body the segment passes within
+   * `INTERCEPT_RADIUS` of, or null. Standard point-to-segment distance; the
+   * missile count is single digits, so this is a handful of dot products.
+   */
+  _interceptedMissile(origin, dir, maxDist, owner) {
+    let best = null;
+    let bestT = maxDist;
+    for (const m of this.missiles) {
+      if (m.owner === owner || m.armT > 0) {
+        continue;
+      }
+      _t.copy(m.pos).sub(origin);
+      const along = _t.dot(dir);
+      if (along < 0 || along > bestT) {
+        continue;
+      }
+      if (_t.lengthSq() - along * along > INTERCEPT_RADIUS * INTERCEPT_RADIUS) {
+        continue;
+      }
+      best = m;
+      bestT = along;
+    }
+    return best;
+  }
+
+  /** Sets a warhead off — where it is, or at a given contact point. */
+  detonate(m, owner, at) {
+    const i = this.missiles.indexOf(m);
+    if (i < 0) {
+      return;
+    }
+    // Out of the world FIRST. `explode` casts a fragment fan back through the
+    // solver, and a warhead that is still in the list while its own blast is
+    // being resolved is a warhead that can be asked to go off twice.
+    this.game.scene.remove(m.mesh);
+    this.missiles.splice(i, 1);
+    const w = m.weapon;
+    this.game.explode(at || m.pos.clone(), {
+      radius: w.blast.radius,
+      energy: w.blast.energy,
+      shrapnel: w.blast.shrapnel,
+      shrapnelEnergy: w.blast.shrapnelEnergy,
+      // Credit the kill to whoever shot it down, not to whoever launched it.
+      owner: owner || m.owner,
+      incendiary: true,
+    });
   }
 
   _modulePoint(ship, moduleId, out) {
@@ -375,11 +427,28 @@ export class Ballistics {
       }
       s.gatherRayHits(origin, dir, maxDist, hits);
     }
-    if (hits.length === 0) {
-      return { stopped: false, energy: ctx.energy, point: null };
-    }
     if (hits.length > 1) {
       hits.sort((a, b) => a.t - b.t);
+    }
+
+    // Ordnance in flight is a target. The repeater's whole stated job is
+    // shredding incoming torpedoes and it could not: nothing tested a round
+    // against anything but ships, so a warhead once launched always arrived and
+    // point defence was three turrets that did nothing a broadside could not.
+    // Checked before the hull walk so a round kills the torpedo in front of the
+    // ship rather than the plating behind it.
+    //
+    // Aimed fire only. Letting a blast's fragment fan clear ordnance too would
+    // mean one torpedo sympathetically detonating the rest — and it would do it
+    // from inside `_stepMissiles`'s own loop over the array it is splicing.
+    const kill = ctx.caliber === 'shrapnel' ? null : this._interceptedMissile(origin, dir,
+      hits.length > 0 ? Math.min(maxDist, hits[0].t) : maxDist, ctx.owner);
+    if (kill) {
+      this.detonate(kill, ctx.owner);
+      return { stopped: true, energy: 0, point: kill.pos.clone() };
+    }
+    if (hits.length === 0) {
+      return { stopped: false, energy: ctx.energy, point: null };
     }
 
     let E = ctx.energy;

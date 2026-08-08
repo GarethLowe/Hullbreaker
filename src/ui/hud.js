@@ -21,6 +21,11 @@ const _v = new THREE.Vector3();
 const _proj = { x: 0, y: 0, visible: false, behind: false };
 const _proj2 = { x: 0, y: 0, visible: false, behind: false };
 
+/** Short names for the facet read-out. Six characters is all there is room for. */
+const FACET_SHORT = {
+  fore: 'FORE', aft: 'AFT', port: 'PORT', stbd: 'STBD', dorsal: 'DORS', ventral: 'VENT',
+};
+
 /** Where each facet sits on the rose drawn around the reticle. */
 const ROSE = {
   fore: [0, -1], aft: [0, 1], port: [-1, 0], stbd: [1, 0],
@@ -44,6 +49,7 @@ export class HUD {
       throttleTxt: document.getElementById('hudThrottleTxt'),
       assist: document.getElementById('hudAssist'),
       shield: document.getElementById('hudShieldFill'),
+      facets: document.getElementById('hudFacets'),
       hull: document.getElementById('hudHullFill'),
       drive: document.getElementById('hudDriveFill'),
       helm: document.getElementById('hudHelmTxt'),
@@ -166,7 +172,36 @@ export class HUD {
     this._set(this.el.assist, 'text', assistOn ? 'FA ON' : 'FA OFF');
     this._set(this.el.assist, 'color', assistOn ? '#7fd8ff' : '#ffb04a');
 
-    this._set(this.el.shield, 'width', `${Math.round(sys.shieldFraction() * 100)}%`);
+    this._set(this.el.shield, 'width', `${Math.round(sys.shieldRated() * 100)}%`);
+
+    // Which side is open, and how much of the shield you PAID for is still
+    // there. Two separate facts, and the display used to conflate them into a
+    // lie.
+    //
+    // Every bar was charge ÷ current max — but killing a projector lowers the
+    // ceiling, so max falls with charge and the ratio stays pinned at 100%. A
+    // cruiser that had lost both amplifiers, and with them a third of its
+    // shield, read as a completely healthy shield. The one reading a player
+    // trusts most was the one that could not report the damage.
+    //
+    // So the bar is measured against the hull's RATED per-facet capacity. The
+    // lit part is charge; the dim part behind it is ceiling you no longer have
+    // and cannot recharge into until the projectors are repaired.
+    const rated = ship.hull.shield.capacity / FACETS.length;
+    this._set(this.el.facets, 'html', FACETS.map((k) => {
+      const f = sys.shield.facets[k];
+      const charge = clamp01(f.charge / rated);
+      const ceiling = clamp01(f.max / rated);
+      const load = f.loadMax > 0 ? clamp01(f.load / f.loadMax) : 0;
+      const cls = f.down ? 'down' : (load > 0.5 ? 'hot' : '');
+      // A collapsed facet says WHY: an emitter that has run out of power comes
+      // straight back, one that has saturated will not until it has cooled.
+      const read = f.down ? (f.cause || 'DOWN') : `${Math.round(charge * 100)}`;
+      return `<span class="facet ${cls}">`
+        + `<u style="width:${Math.round(ceiling * 100)}%"></u>`
+        + `<i style="width:${Math.round(charge * 100)}%"></i>`
+        + `<em>${FACET_SHORT[k]}</em><b>${read}</b></span>`;
+    }).join(''));
     this._set(this.el.hull, 'width', `${Math.round(sys.hullFraction() * 100)}%`);
     // Drive authority and the flight computer, together, are the mission-kill
     // condition. Shown as one gauge because they fail as a pair: either alone
@@ -197,19 +232,59 @@ export class HUD {
       + (fires ? `  ·  <span class="bad">FIRE x${fires}</span>` : '')
       + (breaches ? `  ·  <span class="bad">BREACH x${breaches}</span>` : ''));
 
-    // The two selected weapons, and whether each is actually able to fire.
-    const groups = ship.weaponGroups;
-    const slot = (idx, btn) => {
-      const g = groups[idx];
-      if (!g) {
-        return `<div class="slot cold"><span class="btn">${btn}</span><span>—</span></div>`;
+    // -- the armoury ---------------------------------------------------------
+    // Every weapon the ship carries, not just the two bound to the buttons,
+    // and for each of them the two things a gunner actually needs: how many of
+    // its mounts are alive, and — if it is not shooting — why not.
+    //
+    // The panel used to be two names and an opacity change. That is enough to
+    // say "something is wrong somewhere" and nothing more, on a ship where a
+    // gun can be silent because its magazine is empty, its hoist was cut, its
+    // loop boiled it, its bus is shed or it simply cannot bear. Those have
+    // completely different answers and the display owed you which one it was.
+    // It also hid the ordnance entirely: the torpedo tubes are the third of six
+    // groups on a wheel with no list, so the ship's one homing weapon was
+    // effectively undiscoverable.
+    this._set(this.el.weapons, 'html', ship.weaponGroups.map((g, i) => {
+      let live = 0;
+      let fault = null;
+      let pips = '';
+      for (const m of g.mounts) {
+        // Cycling is a gun working, not a gun broken; showing it would strobe
+        // the panel six times a second on a repeater.
+        const f = ship.mountFault(m);
+        const bad = f && f !== 'CYCLING';
+        if (bad) {
+          fault = fault || f;
+        } else {
+          live++;
+        }
+        pips += `<i class="${bad ? 'bad' : 'ok'}"></i>`;
       }
-      const live = g.mounts.some((m) => m.mod.eff > 0.12 && !m.mod.destroyed);
-      return `<div class="slot${live ? '' : ' cold'}"><span class="btn">${btn}</span>`
-        + `<span>${g.name}</span></div>`;
-    };
-    this._set(this.el.weapons, 'html',
-      slot(player.primary, 'LMB') + slot(player.secondary, 'RMB'));
+      // Reasons it will not shoot, most fundamental first.
+      let state = 'READY';
+      let cls = '';
+      if (live === 0) {
+        state = fault || 'OFFLINE';
+        cls = 'dead';
+      } else if (g.weapon.kind === 'missile' && !tgt.target) {
+        // A seeker with nothing to seek flies straight on and wastes itself.
+        state = 'NO LOCK';
+        cls = 'warn';
+      } else if (tgt.target && !g.mounts.some((m) => ship.onTarget(m, tgt.target, 0.09))) {
+        state = 'NO BEARING';
+        cls = 'warn';
+      } else if (fault) {
+        state = fault;
+        cls = 'warn';
+      }
+      const key = (i === player.primary ? 'L' : '') + (i === player.secondary ? 'R' : '');
+      return `<div class="wrow ${cls}${key ? ' bound' : ''}">`
+        + `<span class="btn">${key || '·'}</span>`
+        + `<span class="wname">${g.name}</span>`
+        + `<span class="pips">${pips}</span>`
+        + `<span class="wstate">${state}</span></div>`;
+    }).join(''));
 
     // Loaded round, with what is left in the magazines behind it.
     if (ship.usesAmmo) {
@@ -395,6 +470,19 @@ export class HUD {
         ctx.lineWidth = 1;
         ctx.stroke();
       }
+      // A collapsed facet gets struck through. Colour alone is not enough at
+      // four and a half pixels in peripheral vision while something is
+      // shooting at you — and "which side is open" is the one thing on this
+      // display worth interrupting the player for.
+      if (facet.down) {
+        ctx.strokeStyle = facet.cause === 'SATURATED'
+          ? 'rgba(255,190,110,0.95)' : 'rgba(255,120,105,0.95)';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(x - 7, y - 7); ctx.lineTo(x + 7, y + 7);
+        ctx.moveTo(x + 7, y - 7); ctx.lineTo(x - 7, y + 7);
+        ctx.stroke();
+      }
     }
 
     // --- reticle -----------------------------------------------------------
@@ -456,6 +544,40 @@ export class HUD {
         ctx.moveTo(_proj.x, _proj.y - 11); ctx.lineTo(_proj.x, _proj.y - 7);
         ctx.stroke();
       }
+    }
+
+    // --- ordnance in flight ------------------------------------------------
+    // A torpedo takes the better part of ten seconds to cross three kilometres
+    // and is a two-metre cone against a starfield, so without a mark on it the
+    // ship's only homing weapon is fire-and-forget in the literal sense —
+    // nothing tells you it launched, nothing tells you it is still running, and
+    // nothing tells you one is running at YOU. Yours are drawn amber outbound;
+    // anything tracking this hull is drawn red, and says so.
+    let inbound = 0;
+    for (const m of game.ballistics.missiles) {
+      const mine = m.owner === ship;
+      const atMe = m.target === ship;
+      if (atMe) {
+        inbound++;
+      }
+      player.project(m.pos, _proj2);
+      if (!_proj2.visible) {
+        continue;
+      }
+      ctx.strokeStyle = atMe ? 'rgba(255,90,70,0.95)'
+        : (mine ? 'rgba(255,190,90,0.8)' : 'rgba(160,180,195,0.5)');
+      ctx.lineWidth = atMe ? 1.8 : 1.2;
+      const s = atMe ? 7 : 5;
+      ctx.beginPath();
+      ctx.moveTo(_proj2.x, _proj2.y - s);
+      ctx.lineTo(_proj2.x + s, _proj2.y);
+      ctx.lineTo(_proj2.x, _proj2.y + s);
+      ctx.lineTo(_proj2.x - s, _proj2.y);
+      ctx.closePath();
+      ctx.stroke();
+    }
+    if (inbound > 0) {
+      this.nudge(`TORPEDO INBOUND x${inbound} — POINT DEFENCE`, 0.5);
     }
 
     if (!tgt.target || tgt.target.disposed) {

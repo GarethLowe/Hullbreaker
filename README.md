@@ -2,7 +2,7 @@
 
 A browser 6DOF **capital-ship** combat simulator whose ships are **modelled
 interiors**, not health bars. Every vessel is 95 to 380 metres of pressurised
-compartments holding 32 to 72 functional components, wired together by three
+compartments holding 38 to 83 functional components, wired together by three
 utility networks — **power**, **data** and **coolant** — and crewed by hundreds
 of hands in divisions that have to walk to a problem before they can fix it.
 
@@ -18,10 +18,10 @@ propagate through a complex system over time, not to win a reflex contest.
 
 | | role | length | mass | crew | compartments | components |
 |-|-|-|-|-|-|-|
-| **SABRE** | picket | 95 m | 4,100 t | 85 | 8 | 32 |
-| **HALBERD** | line frigate | 165 m | 15,900 t | 180 | 11 | 48 |
-| **MERIDIAN** | heavy cruiser *(yours)* | 250 m | 45,500 t | 420 | 14 | 72 |
-| **BASTION** | dreadnought | 380 m | 165,900 t | 1,050 | 14 | 69 |
+| **SABRE** | picket | 95 m | 4,100 t | 85 | 8 | 38 |
+| **HALBERD** | line frigate | 165 m | 15,900 t | 180 | 11 | 55 |
+| **MERIDIAN** | heavy cruiser *(yours)* | 250 m | 45,500 t | 420 | 14 | 83 |
+| **BASTION** | dreadnought | 380 m | 165,900 t | 1,050 | 14 | 80 |
 
 Thirty seconds of cruiser gunnery into a frigate, measured: shields to 43%, nine
 compartments opened, and the frigate had lost its **sensors**, **both fuel
@@ -193,6 +193,228 @@ every hull — but it rolled to whichever side came first, and for a target abea
 that was reliably the ventral one: the ship turned to face a contact and masked
 its own broadside doing it. It now rolls the contact onto the DECK. Same
 manoeuvre, aimed properly.
+
+#### A gun with nothing locked lays on the reticle
+
+`arc` describes where a mount *may* point; something still has to ask it to. For
+a long time nothing did unless a target was locked, and with no lock every mount
+reverted to the bearing the tables bolted it down at — the MERIDIAN's lances
+five degrees out to port and starboard, its broadsides twelve, its point
+defence forty-odd. The reticle therefore described exactly one gun on the ship
+and every other mount threw its rounds off at an angle, which reads from the
+cockpit as half the arsenal being broken. Nothing was: the mounts could always
+traverse and the clamp was always correct.
+
+A mount with a live fire-control link and no target now lays on the boresight,
+so the reticle means what it looks like it means. Losing the link is what drops
+a gun back to its rest bearing, which is the state that should look like nobody
+is telling it where to shoot.
+
+The corollary is an authoring invariant, asserted in `selfcheck`: **every mount
+must be able to traverse onto the boresight.** Two dorsal repeaters were aimed
+up and *aft* — 135 degrees off the bow with a 75 degree arc, sixty degrees short
+— so triggering the point-defence group fired a third of it into empty space no
+matter what the ship was pointing at.
+
+#### The field encloses the hardware, not just the compartments
+
+`shield.radii` is derived, and it used to be derived from the compartment boxes
+alone. That was true when a hull was a row of boxes. It is not any more: a
+MERIDIAN mass driver is a twenty-seven metre machine on a hull twenty-eight
+metres tall, it stands *on* the plating rather than inside it, and it swings.
+The HALBERD's dorsal driver ended up two per cent outside its own ship's bubble,
+where a round could reach it without the field getting a say.
+
+The derivation now encloses each mount's traverse sweep as well — bounded by the
+cone the arc actually allows, not by the sphere around the trunnion, because
+treating a barrel as free to point anywhere trebles a ship's dorsal shield
+radius to cover a position it can never reach.
+
+#### Point defence has something to defend against
+
+The repeater's stated job is shredding incoming torpedoes and it could not:
+nothing tested a round against anything but ships, so a warhead once launched
+always arrived. Aimed fire now kills ordnance in flight, which is the half of
+the homing-weapon loop that was missing — and it makes the dorsal mounts worth
+their tonnage rather than a worse broadside. Blast fragments deliberately do not
+do this: sympathetic detonation would splice the missile array from inside the
+loop already walking it, and one torpedo should not clear a salvo.
+
+#### Nothing vital exists only once
+
+The three utility networks were trees. Seventy nodes across the four hulls hung
+off a single run each, so one round in the right compartment took a whole
+branch — a cruiser's port battery, its fire control, its core cooling loop —
+and nothing about that is how anything this size is built.
+
+Runs are rated now. `cap` is what a conduit carries, 0..1 of full service, and
+`_tickNetworks` is a widest-path search rather than a reachability flood: a
+node's service level is the best any surviving route can deliver, and a route is
+only as good as its narrowest run. Main trunks are 1. Emergency ties are thinner
+cable or smaller-bore pipe laid down a different part of the ship and rated 0.45
+to 0.6, and every hull now carries them — keel trunks, battery cross-ties,
+casualty buses, coolant cross-connects.
+
+So cutting a main no longer switches a branch off. It drops it onto the tie, and
+everything on it runs derated: `eff` folds in the power level, coolant coupling
+and loop rejection fold in the flow. Cut both of the MERIDIAN's forward trunks
+and the bow does not go dark — it runs at 45% until somebody re-lays the main.
+Cut the tie as well and *then* it is dark. Redundancy costs capability instead
+of being free, which is the trade that makes it worth modelling at all.
+
+`selfcheck` cuts every conduit on every hull in turn and asserts nothing that
+needs service loses it. Two exemptions are marked `sole` and are deliberate: a
+gun hoist is meant to be the single feed to its own turret, and a picket's one
+computer is meant to be its weakness.
+
+#### Holding a shield is cheap; working one is not
+
+A shield used to be billed for how much charge it was HOLDING — `draw * (0.22 +
+0.78 * held)` — plus the entire recharge budget levied whether or not a single
+joule was actually being put back. So a full, quiet, undamaged field was the
+most expensive thing on the ship: **407 MW of a cruiser's 770 MW rating,
+forever**. The projectors also declare the largest heat load aboard, 1360 units
+on the MERIDIAN against both reactors' 1180, and nothing scaled it, because
+`shieldGen` is not a duty kind and `heatIn` therefore fell back to `eff`.
+
+Reactors had the same gap: `eff` is a plant's *condition*, not its load, so an
+intact reactor made full rated waste heat whether the ship was drawing 73 MW or
+770 — despite the line above it promising "duty-proportional, so a drive at 20 %
+throttle runs cool".
+
+Together those meant an undamaged cruiser could not hold a steady state parked.
+It settled at 98 °C, derated its own reactors to two thirds of rating and shed
+the amplifiers that set its shield ceiling — **silently**, because charge and
+ceiling fall together and the HUD reads their ratio, so it showed 100 % shields
+while 54 % of the shield was gone.
+
+Both are billed for WORK now. A shield's duty is `max(deficit, load)` — pulling
+drained facets back up, and channelling what the emitters are absorbing — with a
+floor for standing losses; a plant's duty is its output against its rating. The
+shield's *capability* is untouched: capacity, regen, coupling and dissipation
+are all the same numbers. Only what it costs to keep lit changed.
+
+| MERIDIAN, undamaged | demand | supply | loop | ceiling | shed |
+|-|-|-|-|-|-|
+| at rest, shields up | 363 MW | 770 | 30 °C | 100% | 0 |
+| cruising | 573 MW | 770 | 59 °C | 100% | 0 |
+| firing everything | 668 MW | 770 | 58 °C | 100% | 0 |
+| shield under fire | 518 MW | 770 | 39 °C | 100% | 0 |
+| **all three at once** | **992 MW** | **704** | 63 °C | 100% | **8** |
+
+Any one of the three is comfortable. All three together flattens the capacitor,
+drops the bus to 0.87 and starts shedding — which is the moment the strain is
+supposed to arrive.
+
+#### Panels, not a fudge factor — and cooling is not a shield buff
+
+The two big hulls could not reject what they made. Four wing radiators left the
+MERIDIAN at 94 °C and 78% of rated output, and the BASTION at 110 °C and 80%,
+parked and undamaged. They carry real panels now — dorsal and keel, spread fore
+and aft — rather than a multiplier on the existing four, because a radiator is a
+module you can shoot off and heat rejection that all lives on four surfaces goes
+away together the first time somebody rakes the broadsides.
+
+That immediately broke something else. Shield dissipation scales with heat
+rejection, and heat rejection was an ABSOLUTE figure which every hull happened
+to author to exactly 1.0 — so it doubled as "fraction of my panels still
+working" and the two uses were indistinguishable. Fitting the panels took the
+dreadnought's total to 1.88 and, through that one number, very nearly doubled
+its shield dissipation: its fore facet went from saturating under four lances in
+7.5 seconds to surviving four hundred.
+
+They are two quantities now. `rejectCapacity` is absolute area and drives how
+fast the loops shed, so bolting panels on genuinely cools the ship.
+`rejectFraction` is how much of the designed complement survives, and that is
+what shield dissipation is actually about — "strip a ship's radiators and its
+shields saturate" is a statement about losing them, not about how many the
+designer fitted. Saturation is back to 1.9 s and 7.5 s exactly, and shooting
+half the panels off still takes it to 1.4 s and 4.8 s.
+
+| undamaged, at rest | before | after |
+|-|-|-|
+| MERIDIAN | 94 °C, 78% of rating | 85 °C, 91% |
+| BASTION | 110 °C, 80% of rating | 79 °C, 99% |
+
+#### The shield gauge could not report its own damage
+
+`shieldFraction()` is charge divided by the CURRENT maximum, and killing a
+projector lowers that maximum — so charge and ceiling fall together and the
+ratio stays pinned near 1. A cruiser that had lost both amplifiers, and with
+them nearly a third of its shield, read as a completely healthy shield. The
+gauge a player trusts most was the one gauge that could not report the damage.
+
+The six facet bars are measured against the hull's RATED per-facet capacity now.
+The lit part is charge; the dim part behind it is ceiling you no longer have and
+cannot recharge into until the projectors are repaired. Same event, both
+amplifiers gone: the old ratio still says 100%, the bars say 72%.
+
+#### A cut run is a gradient, not a switch
+
+A conduit was intact or severed with nothing in between, and that was invisible
+until the network started carrying a service level. Then it produced something
+plainly wrong: `repairModule` clears `destroyed` on the FIRST joule of work, so
+a party touching a severed main trunk restored the entire branch to full service
+at 0.2% of the cable's health. A cruiser's forward bus came back one second
+after being cut, which made the cross-ties decorative and made cutting anything
+pointless.
+
+A run carries a fraction of its rating from its condition now — nothing until
+the splice is holding, full only once the work is properly finished. Cutting
+both of the MERIDIAN's forward trunks drops the bus to 0.45 on the tie, and
+re-laying one walks it back up: 0.45 while the party is splicing, 0.83 at 57%
+cable health, full at about ten seconds. It is also the honest answer for battle
+damage, and it is what lets a network be *degraded* rather than only ever on or
+off.
+
+#### Every heat source is on a loop
+
+Eighteen components across the four hulls produced heat and were wired to no
+coolant loop at all — every sensor array, every point-defence mount, the torpedo
+tubes, and on the light hulls the main battery, which is the single biggest heat
+source on the ship. With nowhere to put it they equilibrated far above the
+derate threshold on an *undamaged, idle* hull: the MERIDIAN's sensor suite sat
+at 109 °C and 80% efficiency having done nothing at all.
+
+That breaks the invariant `_tickCoolant` is built around and states outright —
+that a hot reading always means damage, an overdriven duty cycle or a failing
+loop, and never merely "this is a big ship". All eighteen are on a loop now, and
+the sensors read 100% at rest on three of the four hulls.
+
+#### Damage control does not give up
+
+A mauled ship with a full crew and full lockers has to be recoverable, or the
+spares, the parties and the whole repair model are decoration. Modules already
+rebuilt from nothing — a destroyed one costs its whole health bar in spares and
+time, which is the intended "limping, with a chance". Two things were permanent
+and should not have been.
+
+The patch job was filtered on `s.breached && s.atmo > 0.03`, so a compartment
+that finished venting was never worked on again. A bow array sat open for
+twenty-five minutes with its plating already welded back to full, a four square
+metre hole and two thousand three hundred spares in the lockers, and nobody
+aboard would go near it. Vacuum is what the suits are for — and only suited
+parties can path into one, so the job is scored and the pathing decides who can
+take it.
+
+And nothing anywhere restored `frameHp`. A buckled frame meant a compartment was
+twice as slow to move through and counted against integrity for the rest of the
+ship's life. Reframing is a job now, deliberately the slowest one aboard, and it
+happens once the hull is shut.
+
+Ten wrecked modules, two breaches and a buckled frame now recover in about seven
+minutes for 280 spares.
+
+#### Which side is open
+
+An aggregate shield bar reading 60% is worthless: 60% with the fore facet
+collapsed and 60% spread evenly are different ships in different amounts of
+trouble, and only one of them should be pointing its nose at anything. The six
+facets are named and read out individually — charge, saturation, and the CAUSE
+when one is down, because an emitter that ran out of power comes straight back
+and one that saturated will not until it has cooled. The rose at the reticle
+keeps its glance-cue job and strikes a collapsed facet through, since colour
+alone does not carry at four pixels while something is shooting at you.
 
 #### The inside agrees with the outside
 

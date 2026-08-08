@@ -133,6 +133,7 @@ export class Diagnostics {
       }
       groups.get(g).push(m);
     }
+    this._groups = [];
     for (const sys of SYSTEM_ORDER) {
       const mods = groups.get(sys);
       if (!mods || mods.length === 0) {
@@ -142,6 +143,8 @@ export class Diagnostics {
       head.className = 'diag-group';
       head.textContent = sys;
       this.treeEl.appendChild(head);
+      const members = [];
+      this._groups.push({ head, members });
       mods.sort((a, b) => a.label.localeCompare(b.label));
       for (const m of mods) {
         const row = document.createElement('div');
@@ -159,9 +162,17 @@ export class Diagnostics {
         row.appendChild(bar);
         row.appendChild(val);
         this.treeEl.appendChild(row);
-        this._rows.set(m.id, { row, fill, val, name });
+        const entry = { row, fill, val, name, shown: true };
+        this._rows.set(m.id, entry);
+        members.push(entry);
       }
     }
+    // Shown when the whole tree is hidden, so an empty panel reads as "nothing
+    // is wrong" rather than as a panel that failed to draw.
+    this._nominal = document.createElement('div');
+    this._nominal.className = 'diag-nominal';
+    this._nominal.textContent = 'ALL SYSTEMS NOMINAL';
+    this.treeEl.appendChild(this._nominal);
     this._builtFor = ship.hull.id;
   }
 
@@ -196,6 +207,12 @@ export class Diagnostics {
       : `${formatRange(dist)}  ·  ${netBits}`;
 
     // --- tree ---------------------------------------------------------------
+    // Only what is wrong. A healthy cruiser has seventy-odd modules and every
+    // one of them drew a full-width green bar reading CONTINUITY, which is
+    // seventy rows of "fine" for the two that are not — the one thing the
+    // panel exists to tell you was the hardest thing on it to find. A row
+    // appears when it stops being nominal, when it is being repaired, or when
+    // it is the subsystem you have designated.
     for (const [id, r] of this._rows) {
       const m = sys.get(id);
       if (!m) {
@@ -205,9 +222,22 @@ export class Diagnostics {
       const cls = LEVEL_CLASS[st.level];
       if (r.row.dataset.lvl !== cls) {
         r.row.dataset.lvl = cls;
+        // Rewriting className drops `hidden` and `selected`; force both to be
+        // re-applied below rather than leaving a row visible because its level
+        // happened to change on the same tick it should have been folded away.
         r.row.className = `diag-row ${cls}`;
+        r.shown = null;
+        delete r.row.dataset.sel;
       }
       const sel = id === this._selected;
+      const show = st.level !== LEVEL.OK || m.repairing || sel;
+      if (r.shown !== show) {
+        r.shown = show;
+        r.row.classList.toggle('hidden', !show);
+      }
+      if (!show) {
+        continue;
+      }
       if (r.row.dataset.sel !== String(sel)) {
         r.row.dataset.sel = String(sel);
         r.row.classList.toggle('selected', sel);
@@ -223,6 +253,15 @@ export class Diagnostics {
         r.val.textContent = txt;
       }
     }
+
+    // A heading with nothing under it is noise too.
+    let any = false;
+    for (const grp of this._groups) {
+      const live = grp.members.some((e) => e.shown);
+      any = any || live;
+      grp.head.classList.toggle('hidden', !live);
+    }
+    this._nominal.classList.toggle('hidden', any);
 
     this._renderCrew(ship);
     this._renderCutaway(ship);

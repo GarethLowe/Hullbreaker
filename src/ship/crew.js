@@ -265,8 +265,31 @@ export class Crew {
           bestScore = score;
         }
       }
-      if (s.breached && s.atmo > 0.03) {
-        const score = (34 + s.breachSize * 20) * near;
+      // A hull breach is a job until it is shut, and a compartment that has
+      // finished venting is the MOST urgent one rather than an excluded one.
+      //
+      // This used to read `s.breached && s.atmo > 0.03`, which meant a hole big
+      // enough to empty its compartment could never be worked on again: the
+      // party stopped coming the moment the air ran out. A bow array sat open
+      // for twenty-five minutes with its plating already welded back to full,
+      // a four square metre hole and two thousand three hundred spares in the
+      // lockers, and nobody aboard would go near it. Vacuum is what the suits
+      // are for — and only suited parties can path into one, so this scores the
+      // job and the pathing decides who is able to take it.
+      //
+      // Structural work counts too: a buckled frame is why a compartment stays
+      // hard to move through after the hull is closed.
+      if (s.breached || s.frameBroken) {
+        // Capped, or a fifty square metre hole outranks a magazine fire by ten
+        // to one and the ship burns while the party welds.
+        let score = 34 + Math.min(s.breachSize, 5) * 20;
+        if (s.atmo <= ATMO_CRITICAL) {
+          score += 26;
+        }
+        if (!s.breached) {
+          score -= 40;    // sealed already; reframing can wait for the fires
+        }
+        score *= near;
         if (score > bestScore) {
           best = { kind: 'patch', target: s.id };
           bestScore = score;
@@ -485,7 +508,7 @@ export class Crew {
       }
       case 'patch': {
         const s = this.sys.section(task.target);
-        if (!s || !s.breached) {
+        if (!s || (!s.breached && !s.frameBroken)) {
           d.task = null;
           break;
         }
@@ -498,7 +521,7 @@ export class Crew {
           break;
         }
         this.sys.patchSection(s.id, Math.min(want, spares * JOULES_PER_SPARE));
-        if (!s.breached) {
+        if (!s.breached && !s.frameBroken) {
           d.task = null;
         }
         break;
