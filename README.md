@@ -512,6 +512,36 @@ that a hot reading always means damage, an overdriven duty cycle or a failing
 loop, and never merely "this is a big ship". All eighteen are on a loop now, and
 the sensors read 100% at rest on three of the four hulls.
 
+#### A wrecked store still has something in it
+
+Spares are inert boxes on shelves, not machinery, and a destroyed bay held
+literally nothing. The SABRE carries its whole 260 units in one hold, so a
+single round through it ended that ship's ability to repair anything at all,
+permanently — the parties kept taking jobs, finding nothing to work with,
+dropping them and walking back to station, which from the panel looks exactly
+like a crew standing idle while the ship falls apart.
+
+A wrecked bay keeps 40% of its stock now, lying in the compartment where anyone
+can pick it up. Running your stores down over a long engagement is the
+interesting failure; having them deleted by one hit was the arbitrary one.
+
+#### The roster says what each party is on
+
+With divisions split into parties, one state per division stopped meaning
+anything: "STATION" covered both "nothing to do" and "eleven parties spread over
+six compartments" equally badly. Each division now lists what its parties are
+severally working, grouped by job so eleven parties on four jobs read as four
+lines, with the fitting named and the hands on it.
+
+```
+GUNNERY PORT      45/45  PORT BATTERY FWD   REPAIR 8/8
+   FIX  PORT RADIATOR FWD                          17
+   FIX  PORT ROLL JETS                             17
+   FIX  PORT BROADSIDE FWD                         11
+DAMAGE CONTROL A  65/65  MAIN SPINE         MOVING 11/11
+   FIX  DORSAL RUN                                 24
+```
+
 #### Damage control works in parties, not as a mob
 
 A division is an establishment — a name, a trade, a station and a headcount —

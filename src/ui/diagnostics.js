@@ -42,6 +42,11 @@ const LEVEL_COLOR = {
   [LEVEL.OK]: '#5fd39a', [LEVEL.WARN]: '#ffc65c', [LEVEL.CRIT]: '#ff8a4a', [LEVEL.DEAD]: '#ff5a5a',
 };
 
+/** How a party's current job reads in the crew list. */
+const JOB_VERB = {
+  repair: 'FIX', patch: 'WELD', fire: 'FIRE', moving: '→',
+};
+
 const ROLE_COLOR = {
   pilot: '#8fd8ff', gunner: '#ffc65c', engineer: '#7ae6a0', damage: '#e0e6ec',
 };
@@ -365,6 +370,14 @@ export class Diagnostics {
         + `<span class="crew-count">${c.size}/${c.max}</span>`
         + `<span class="crew-where">${where}</span>`
         + `<span class="crew-state">${state}</span></div>`;
+      // What its parties are severally on. Without this the panel says
+      // "STATION" whether a division has nothing to do or is spread over six
+      // compartments, and those are not the same ship.
+      for (const j of c.jobs || []) {
+        html += `<div class="crew-job"><span class="crew-job-k">${JOB_VERB[j.kind] || j.kind}</span>`
+          + `<span class="crew-job-w">${j.what}</span>`
+          + `<span class="crew-job-n">${j.hands}</span></div>`;
+      }
     }
     const spares = ship.sys.totalSpares();
     html += `<div class="crew-foot">SPARES ${spares}`

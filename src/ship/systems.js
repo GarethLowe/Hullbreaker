@@ -145,6 +145,20 @@ const COUPLING_EXP = 0.35;
  * now — not that the slug gets through, but that it saturates what stopped it.
  */
 const SPIKE_MAX = 3.0;
+
+/**
+ * Fraction of a stores bay's stock still findable after the compartment is
+ * wrecked.
+ *
+ * Spares are inert boxes on shelves, not machinery — a smashed store room does
+ * not vaporise, it spills. Treating a destroyed bay as holding literally
+ * nothing meant a SABRE, which carries its entire 260 units in one hold, lost
+ * the whole damage-control capability to a single round: the parties kept
+ * taking jobs, finding nothing to work with, and returning to station forever.
+ * Running your stock down over a long fight is the interesting failure; having
+ * it deleted by one hit is the arbitrary one.
+ */
+const SPARES_SALVAGE = 0.40;
 /**
  * Coupling capacity of one facet, in watts per joule of that facet's energy
  * capacity. Expressed as a RATIO rather than an absolute so it survives a
@@ -704,6 +718,11 @@ export class Systems {
       case 'computer':
         this.events.push({ type: 'computerKill', at, dir, module: m });
         break;
+      case 'cargo':
+        // What survives being blown about is what the parties can dig out.
+        m.spares *= SPARES_SALVAGE;
+        this.events.push({ type: 'moduleKill', at, dir, module: m });
+        break;
       case 'quarters':
         // Crew berthed here die with it. Handled by the crew sim reading this
         // event, so casualties stay in one place.
@@ -819,11 +838,15 @@ export class Systems {
     return applied;
   }
 
-  /** Draw repair stock from any intact cargo bay. Returns what was available. */
+  /**
+   * Draw repair stock from any bay that still has some. A wrecked bay counts:
+   * it lost most of what it held when it was hit (see `SPARES_SALVAGE`), and
+   * what is left is lying in the compartment where anyone can pick it up.
+   */
   takeSpares(n) {
     let got = 0;
     for (const m of this.modules.values()) {
-      if (m.kind !== 'cargo' || m.destroyed || m.spares <= 0) {
+      if (m.kind !== 'cargo' || m.spares <= 0) {
         continue;
       }
       const take = Math.min(n - got, m.spares);
@@ -840,7 +863,7 @@ export class Systems {
   totalSpares() {
     let n = 0;
     for (const m of this.modules.values()) {
-      if (m.kind === 'cargo' && !m.destroyed) {
+      if (m.kind === 'cargo') {
         n += m.spares;
       }
     }

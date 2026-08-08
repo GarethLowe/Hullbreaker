@@ -876,6 +876,69 @@ for (const [id, h] of Object.entries(HULLS)) {
     `${all.demand.toFixed(0)} vs ${rest.demand.toFixed(0)} MW at rest`);
 }
 
+// --- a wrecked store still has something in it ------------------------------
+// Spares are inert boxes on shelves, not machinery. Treating a destroyed bay as
+// holding literally nothing meant a SABRE — which carries its whole 260 units
+// in one hold — lost the entire damage-control capability to a single round:
+// the parties kept taking jobs, finding nothing to work with, and going back to
+// station forever, which reads from the panel as a crew standing idle.
+{
+  const hull = HULLS.sabre;
+  const sys = new Systems(hull);
+  const crew = new Crew(hull, sys);
+  run(sys, 2, crew);
+  const full = sys.totalSpares();
+  ok('the picket carries its stock in one hold',
+    hull.modules.filter((m) => m.kind === 'cargo').length === 1);
+  ok('and it starts stocked', full > 100, `${full}`);
+
+  sys.damageModule('cargo', 1e12, null, null);
+  const left = sys.totalSpares();
+  ok('wrecking the hold costs most of the stock but not all of it',
+    left > full * 0.2 && left < full * 0.6, `${full} -> ${left}`);
+  ok('...and what is left can actually be drawn on', sys.takeSpares(10) > 0);
+
+  // The capability survives: give it damage and it works on it.
+  for (const id of ['l_core', 'sensor', 'thruster_A', 'rcs_fwd']) {
+    if (sys.get(id)) {
+      sys.damageModule(id, 1e12, null, null);
+    }
+  }
+  const broken = [...sys.modules.values()].filter((m) => m.destroyed).length;
+  run(sys, 240, crew);
+  const after = [...sys.modules.values()].filter((m) => m.destroyed).length;
+  ok('a ship whose only hold was wrecked can still repair itself', after < broken,
+    `${broken} destroyed -> ${after}`);
+}
+
+// --- the roster says what each party is on ----------------------------------
+// A division shows one state, and "STATION" covered both "nothing to do" and
+// "eleven parties spread over the ship" equally badly.
+{
+  const hull = HULLS.meridian;
+  const sys = new Systems(hull);
+  const crew = new Crew(hull, sys);
+  run(sys, 2, crew);
+  for (const id of ['c_dorsal', 'rad_LF', 'sensor', 'pump_aux', 'l_fwd', 'cargo_A',
+    'computer_aux', 'rcs_wingL']) {
+    if (sys.get(id)) {
+      sys.damageModule(id, 4e6, null, null);
+    }
+  }
+  run(sys, 8, crew);
+  const roster = crew.roster();
+  const working = roster.filter((c) => c.jobs.length > 0);
+  ok('the roster reports what the parties are on', working.length > 0);
+  ok('...naming the actual fitting, not an id',
+    working.every((c) => c.jobs.every((j) => j.what && !j.what.includes('_'))),
+    working.flatMap((c) => c.jobs.map((j) => j.what)).join(', '));
+  ok('...with the hands on each', working.every((c) => c.jobs.every((j) => j.hands > 0)));
+  // Several distinct jobs across the ship, which is the point of parties.
+  const distinct = new Set(roster.flatMap((c) => c.jobs.map((j) => j.what)));
+  ok('...and several different jobs at once', distinct.size >= 3,
+    [...distinct].join(', '));
+}
+
 // --- damage control works in parties, not as a mob --------------------------
 // A division is an establishment, not a body of people who all walk to the same
 // hatch. Treating it as one unit that takes ONE job meant a seventy-hand

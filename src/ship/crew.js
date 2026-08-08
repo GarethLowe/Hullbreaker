@@ -890,6 +890,32 @@ export class Crew {
       }
       const top = (m, fallback) => [...m.entries()]
         .sort((a, b) => b[1] - a[1])[0]?.[0] ?? fallback;
+      // What the parties are severally doing, grouped by job so eleven parties
+      // on four jobs read as four lines rather than eleven. This is the thing
+      // the panel could not say before: a division showed one state, and
+      // "STATION" covered both "nothing to do" and "eleven parties spread over
+      // the ship" equally badly.
+      const byJob = new Map();
+      for (const q of live) {
+        if (!q.task && !q.heading) {
+          continue;
+        }
+        const kind = q.task ? q.task.kind : 'moving';
+        const target = q.task ? q.task.target : q.heading;
+        const k = kind + ':' + target;
+        const at = byJob.get(k) || { kind, target, hands: 0, parties: 0 };
+        at.hands += q.size;
+        at.parties += 1;
+        byJob.set(k, at);
+      }
+      const label = (j) => {
+        if (j.kind === 'repair') {
+          const m = this.sys.get(j.target);
+          return m ? m.label : j.target;
+        }
+        const sec = this.hull.sectionById[j.target];
+        return sec ? sec.label : j.target;
+      };
       return {
         name: d.name,
         role: d.role,
@@ -902,6 +928,10 @@ export class Crew {
         out: live.filter((q) => q.task || q.heading).length,
         parties: live.length,
         task: top(byTask, 'station'),
+        /** One entry per distinct job this division has parties on. */
+        jobs: [...byJob.values()]
+          .sort((a, b) => b.hands - a.hands)
+          .map((j) => ({ kind: j.kind, hands: Math.round(j.hands), what: label(j) })),
       };
     });
   }

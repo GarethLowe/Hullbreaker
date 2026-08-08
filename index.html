@@ -410,6 +410,19 @@
   .crew-count { color: var(--ink); font-variant-numeric: tabular-nums; }
   .crew-where { color: var(--dim); }
   .crew-state { color: var(--dim); min-width: 54px; text-align: right; }
+  /* What each division's parties are severally working on. */
+  .crew-job {
+    display: grid;
+    grid-template-columns: 34px 1fr auto;
+    gap: 6px;
+    padding-left: 10px;
+    font-size: 8px;
+    line-height: 11px;
+    color: var(--dim);
+  }
+  .crew-job-k { color: var(--accent); opacity: 0.75; }
+  .crew-job-w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .crew-job-n { font-variant-numeric: tabular-nums; }
   .crew-foot {
     margin-top: 4px;
     padding-top: 4px;
