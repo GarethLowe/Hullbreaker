@@ -413,20 +413,68 @@ for (const [id, h] of Object.entries(HULLS)) {
   const facet = sys.shield.facets.fore;
   const full = facet.charge;
 
-  // Same energy, different delivery time: the field catches far more of the
-  // slow one. This is the whole shield model in one assertion.
+  // A field STOPS things; what it costs is dissipation.
+  //
+  // The model used to decide how much of a hit leaked through from the round's
+  // instantaneous power, and it made a charged facet very nearly transparent to
+  // the weapon most likely to be pointed at it — 28% of an AP driver round
+  // stopped, 29 MJ passed into a bow wall that costs 2.5 MJ to cross. The old
+  // assertion here read "a shield never fully stops a slug", which is exactly
+  // the behaviour that was wrong.
+  //
+  // Delivery time still decides everything, just on the other side of the
+  // ledger: the same joules arriving as a spike LOAD the emitters far harder
+  // than a beam pouring them in slowly. A slug is not hard to stop, it is hard
+  // to shed.
   const E = WEAPONS.railgun.energy;
-  const beamThrough = sys.damageShield('fore', E, WEAPONS.beam.dwell);
   facet.charge = full;
   facet.load = 0;
   const slugThrough = sys.damageShield('fore', E, WEAPONS.railgun.dwell);
-  ok('a shield catches a beam better than a slug', beamThrough < slugThrough,
-    `beam let ${(beamThrough / 1e3).toFixed(0)} kJ through, slug ${(slugThrough / 1e3).toFixed(0)} kJ`);
-  ok('a shield never fully stops a slug', slugThrough > E * 0.5);
-  // At a beam's real per-tick energy the field should be absorbing nearly all
-  // of it — that is what makes lasers the anti-shield weapon.
+  const slugLoad = facet.load;
   facet.charge = full;
   facet.load = 0;
+  // The same total energy, delivered the way a lance actually delivers it —
+  // a frame's worth at a time — rather than pretending a beam arrives as a
+  // single 40 MJ impact.
+  const tickE = WEAPONS.beam.dps / 60;
+  for (let e = 0; e < E; e += tickE) {
+    facet.charge = full;
+    sys.damageShield('fore', tickE, WEAPONS.beam.dwell);
+  }
+  const beamLoad = facet.load;
+  facet.charge = full;
+  facet.load = 0;
+  const beamThrough = sys.damageShield('fore', tickE, WEAPONS.beam.dwell);
+
+  ok('a charged facet stops a driver round outright', slugThrough === 0,
+    `${(slugThrough / 1e6).toFixed(1)} MJ got through`);
+  ok('...and a lance tick, too', beamThrough === 0);
+  ok('but the slug loads the emitters far harder', slugLoad > beamLoad * 2,
+    `slug ${(slugLoad / 1e6).toFixed(0)} MJ vs the same energy as beam `
+    + `${(beamLoad / 1e6).toFixed(0)} MJ`);
+
+  // Charge is the barrier, so a spent facet is no barrier at all.
+  facet.charge = full * 0.02;
+  facet.load = 0;
+  const spentThrough = sys.damageShield('fore', E, WEAPONS.railgun.dwell);
+  ok('a nearly spent facet lets most of it through', spentThrough > E * 0.5,
+    `${(spentThrough / 1e6).toFixed(1)} of ${(E / 1e6).toFixed(1)} MJ`);
+
+  // And it has to be a finite number of rounds, not a wall.
+  facet.charge = full;
+  facet.load = 0;
+  facet.down = false;
+  let rounds = 0;
+  while (!facet.down && rounds < 100) {
+    sys.damageShield('fore', E, WEAPONS.railgun.dwell);
+    rounds++;
+  }
+  ok('a facet gives out after a few driver rounds', rounds >= 3 && rounds <= 12,
+    `${rounds} rounds (${facet.cause})`);
+
+  facet.charge = full;
+  facet.load = 0;
+  facet.down = false;
   const tick = WEAPONS.beam.dps / 60;
   const realBeam = sys.damageShield('fore', tick, WEAPONS.beam.dwell);
   ok('a shield absorbs most of a sustained beam', realBeam < tick * 0.25,
@@ -509,7 +557,7 @@ for (const [id, h] of Object.entries(HULLS)) {
   run(sys, 1);
   const f = sys.shield.facets.fore;
   let guard = 0;
-  while (!f.down && guard++ < 600) {
+  while (!f.down && guard++ < 6000) {
     sys.damageShield('fore', 4e5, WEAPONS.beam.dwell);
     sys.tick(1 / 60);
   }
@@ -722,8 +770,11 @@ for (const [id, h] of Object.entries(HULLS)) {
         if (m.kind === 'hardpoint') { m.duty = bearing.has(m.id) ? sc.guns : 0; }
       }
       if (sc.incoming) {
+        // Sustained pressure the field can actually hold. Harder than this and
+        // the facets collapse, and a collapsed shield stops drawing power —
+        // which measures a dead shield rather than one working for its living.
         for (const f of ['fore', 'port', 'dorsal']) {
-          sys.damageShield(f, (WEAPONS.beam.dps / 60) * 0.9, 1 / 60);
+          sys.damageShield(f, (WEAPONS.beam.dps / 60) * 0.32, 1 / 60);
         }
       }
       sys.tick(1 / 60);
@@ -775,12 +826,20 @@ for (const [id, h] of Object.entries(HULLS)) {
   }
 
   // All three together is meant to hurt.
+  //
+  // Measured against ONE broadside, which is all a beam-on hull can ever fire:
+  // that runs the plant to about 99% of what it is making, so the ship has no
+  // margin left for a boost, a facet re-striking or a battery coming back
+  // online. Both beams at once — which no hull can actually do — is 988 MW
+  // against 729 and shuts things off.
   const all = load({ drive: 1, guns: 1, incoming: 1 });
-  ok('drives, guns and a shield under fire together DO strain the plant',
-    all.demand > all.supply, `${all.demand.toFixed(0)} vs ${all.supply.toFixed(0)} MW`);
-  ok('...enough to flatten the capacitor and start shedding',
-    all.capStore < all.capMax * 0.05
-      && [...all.modules.values()].filter((m) => m.shed).length > 0);
+  ok('drives, guns and a shield under fire together run the plant to its limit',
+    all.demand > all.supply * 0.95,
+    `${all.demand.toFixed(0)} of ${all.supply.toFixed(0)} MW `
+    + `(${((all.demand / all.supply) * 100).toFixed(0)}%)`);
+  ok('...with no headroom left for anything else',
+    all.demand > rest.demand * 1.8,
+    `${all.demand.toFixed(0)} vs ${rest.demand.toFixed(0)} MW at rest`);
 }
 
 // --- the ship cross-decks to stay in the fight ------------------------------

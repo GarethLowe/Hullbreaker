@@ -388,6 +388,38 @@ half the panels off still takes it to 1.4 s and 4.8 s.
 | MERIDIAN | 94 °C, 78% of rating | 85 °C, 91% |
 | BASTION | 110 °C, 80% of rating | 79 °C, 99% |
 
+#### A field stops things; what it costs is dissipation
+
+The shield model decided how much of a hit leaked through from the round's
+instantaneous power against the facet's coupling — and the numbers made a
+charged shield very nearly transparent to the weapon most likely to be pointed
+at it. Measured on a FULL fore facet:
+
+| round | energy | power | through | stopped |
+|-|-|-|-|-|
+| driver / AP | 40.6 MJ | 17.6 GW | 29.1 MJ | 28% |
+| driver / HE | 40.6 MJ | 2.0 GW | 22.0 MJ | 46% |
+| plasma | 20.0 MJ | 3.3 GW | 11.8 MJ | 41% |
+
+Against a bow wall costing 2.5 MJ to cross, a single armour-piercing round went
+through the shield, through the plate, and opened two compartments — with the
+facet still reading full. The whole facet held 43 MJ, less energy than one round
+carried, and there was an assertion enshrining it: *a shield never fully stops a
+slug*.
+
+The field blocks what it can pay for now. What it stops has to go somewhere, and
+that is the real cost: charge to hold the impact, and heat the emitters must
+then shed. Delivery time still decides everything, on the other side of the
+ledger — the same joules arriving as a hypervelocity spike load the emitters
+three times harder than a lance pouring them in slowly. **A slug is not hard to
+stop, it is hard to dissipate.**
+
+So the counter to a shield is weight of fire rather than a magic round type. You
+drain the charge or you saturate the emitters, and only then does anything reach
+the hull — which is what makes the facet read-out worth looking at. A charged
+facet now stops a driver round outright and gives out after about six of them; a
+spent one is no barrier at all.
+
 #### The shield gauge could not report its own damage
 
 `shieldFraction()` is charge divided by the CURRENT maximum, and killing a

@@ -126,9 +126,9 @@ const BREACH_DETONATE_CHANCE = 0.35;
 // This is the whole reason a slug beats a shield and a laser does not.
 export const FIELD_DEPTH = 3.0;
 /** How much load a facet can hold before its emitters saturate, vs capacity. */
-const FACET_LOAD_RATIO = 0.9;
+const FACET_LOAD_RATIO = 8;
 /** Joules of field energy spent re-establishing per joule absorbed. */
-const CHARGE_COST = 0.55;
+const CHARGE_COST = 0.20;
 /** Field energy bought per joule of electrical energy. */
 const RECHARGE_EFF = 0.35;
 /**
@@ -138,6 +138,13 @@ const RECHARGE_EFF = 0.35;
  * and never fully stops one.
  */
 const COUPLING_EXP = 0.35;
+/**
+ * Ceiling on how much harder a spike is to shed than a slow burn. Three: a
+ * hypervelocity driver round loads a facet's emitters three times as hard as
+ * the same joules delivered by a lance. That is the whole anti-shield story
+ * now — not that the slug gets through, but that it saturates what stopped it.
+ */
+const SPIKE_MAX = 3.0;
 /**
  * Coupling capacity of one facet, in watts per joule of that facet's energy
  * capacity. Expressed as a RATIO rather than an absolute so it survives a
@@ -539,16 +546,33 @@ export class Systems {
       this.events.push({ type: 'facetDown', facet, cause: 'COLLAPSED' });
       return joules;
     }
-    const power = joules / Math.max(dwell, 1e-5);
-    const frac = 1 / (1 + Math.pow(power / f.coupling, COUPLING_EXP));
-    let absorbed = joules * frac;
-    // The field cannot catch more than it has the energy to re-establish.
+    // A FIELD STOPS THINGS. That is what it is for.
+    //
+    // This used to decide how much of a hit leaked through from the
+    // instantaneous power of the round against the facet's coupling, and the
+    // numbers made a charged shield very nearly transparent to the one weapon
+    // most likely to be pointed at it: a full facet stopped 28% of an armour-
+    // piercing driver round and passed 29 MJ into a bow wall that costs 2.5 MJ
+    // to cross. One round, through the shield, through the plate, two
+    // compartments open. There was even an assertion enshrining it.
+    //
+    // The field blocks what it can pay for. What it stops has to go SOMEWHERE,
+    // and that is the real cost: charge to hold the impact, and heat the
+    // emitters have to shed afterwards. A hypervelocity slug is not hard to
+    // stop, it is hard to DISSIPATE — the same joules arriving as a spike load
+    // the emitters several times harder than a beam pouring them in slowly.
+    //
+    // So the counter to a shield is weight of fire, not a magic round type: you
+    // drain its charge or you saturate its emitters, and only then does
+    // anything reach the hull. Which is also what makes the facet read-out
+    // worth looking at.
     const affordable = f.charge / CHARGE_COST;
-    if (absorbed > affordable) {
-      absorbed = affordable;
-    }
+    const absorbed = Math.min(joules, affordable);
     f.charge = Math.max(0, f.charge - absorbed * CHARGE_COST);
-    f.load += absorbed;
+    const power = joules / Math.max(dwell, 1e-5);
+    const spike = Math.min(SPIKE_MAX,
+      1 + Math.pow(power / Math.max(f.coupling, 1), COUPLING_EXP));
+    f.load += absorbed * spike;
     // Impact flare, read by the renderer. Brighter for a bigger bite.
     f.hitT = Math.max(f.hitT, 0.30 + 0.55 * clamp01(absorbed / (f.max * 0.25)));
 
