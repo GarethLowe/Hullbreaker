@@ -1630,7 +1630,7 @@ const BASTION = {
       rounds: 2000, cookoff: 1.1e9,
       hoistPos: [5, 0, 0], hoistHp: 4.0e6,
       gunPos: [-3, 3.4, 12], gunHp: 4.4e7,
-      from: 'p.port', data: 'd.fireL', cool: 'l.batF', dir: [0.94, 0, 0.34], arc: 0.82,
+      from: 'p.port', data: 'd.fireL', cool: 'l.batF', dir: [0.94, 0, 0.34], arc: 1.32,
       draw: 52, heat: 440,
     }),
     ...battery('bRF', 'batteryRF', {
@@ -1639,7 +1639,7 @@ const BASTION = {
       rounds: 2000, cookoff: 1.1e9,
       hoistPos: [-5, 0, 0], hoistHp: 4.0e6,
       gunPos: [3, 3.4, 12], gunHp: 4.4e7,
-      from: 'p.stbd', data: 'd.fireR', cool: 'l.batF', dir: [-0.94, 0, 0.34], arc: 0.82,
+      from: 'p.stbd', data: 'd.fireR', cool: 'l.batF', dir: [-0.94, 0, 0.34], arc: 1.32,
       draw: 52, heat: 440,
     }),
     ...battery('bLA', 'batteryLA', {
@@ -1648,7 +1648,7 @@ const BASTION = {
       rounds: 1200, cookoff: 8.0e8,
       hoistPos: [5, 0, 0], hoistHp: 4.0e6,
       gunPos: [-3, 3.4, 12], gunHp: 4.4e7,
-      from: 'p.port', data: 'd.fireL', cool: 'l.batA', dir: [0.94, 0, 0.34], arc: 0.82,
+      from: 'p.port', data: 'd.fireL', cool: 'l.batA', dir: [0.94, 0, 0.34], arc: 1.32,
       draw: 70, heat: 560,
     }),
     ...battery('bRA', 'batteryRA', {
@@ -1657,91 +1657,23 @@ const BASTION = {
       rounds: 1200, cookoff: 8.0e8,
       hoistPos: [-5, 0, 0], hoistHp: 4.0e6,
       gunPos: [3, 3.4, 12], gunHp: 4.4e7,
-      from: 'p.stbd', data: 'd.fireR', cool: 'l.batA', dir: [-0.94, 0, 0.34], arc: 0.82,
+      from: 'p.stbd', data: 'd.fireR', cool: 'l.batA', dir: [-0.94, 0, 0.34], arc: 1.32,
       draw: 70, heat: 560,
     }),
     mod('mag_tor', 'magazine', 'TORPEDO STOWAGE', 'magdeck', [0, 0, 0], {
       half: [12, 5, 11], hp: 5.0e7, vuln: 1.8, sys: 'ORDNANCE',
       extra: { rounds: 120, cookoff: 2.4e9 },
     }),
-    // Two more drivers in every wing. A dreadnought does not get to be the
-    // second-best broadside in the fleet: with the cruiser rebuilt to fight
-    // beam-on, a BASTION still aimed down its own nose lost three duels out of
-    // three without landing a single hull hit — a wide-arc ship it cannot
-    // out-turn simply stays outside its arcs. Same doctrine, dreadnought scale.
-    ...battery('bLF2', 'batteryLF', {
-      label: 'PORT DRIVER FWD B', weapon: 'railgun',
-      magPos: [0, -1.8, 8], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
-      rounds: 1600, cookoff: 9.0e8,
-      hoistPos: [5, 0, 4], hoistHp: 3.6e6,
-      gunPos: [-3, 3.4, 0], gunHp: 4.0e7,
-      from: 'p.port', data: 'd.fireL', cool: 'l.batF', dir: [0.94, 0, 0.34], arc: 0.82,
-      draw: 30, heat: 300,
-    }),
-    ...battery('bLF3', 'batteryLF', {
-      label: 'PORT DRIVER FWD C', weapon: 'railgun',
-      magPos: [0, -1.8, -18], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
-      rounds: 1600, cookoff: 9.0e8,
-      hoistPos: [5, 0, -10], hoistHp: 3.6e6,
-      gunPos: [-3, 3.4, -14], gunHp: 4.0e7,
-      from: 'p.port', data: 'd.fireL', cool: 'l.batF', dir: [0.94, 0, 0.34], arc: 0.82,
-      draw: 30, heat: 300,
-    }),
-    ...battery('bRF2', 'batteryRF', {
-      label: 'STBD DRIVER FWD B', weapon: 'railgun',
-      magPos: [0, -1.8, 8], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
-      rounds: 1600, cookoff: 9.0e8,
-      hoistPos: [-5, 0, 4], hoistHp: 3.6e6,
-      gunPos: [3, 3.4, 0], gunHp: 4.0e7,
-      from: 'p.stbd', data: 'd.fireR', cool: 'l.batF', dir: [-0.94, 0, 0.34], arc: 0.82,
-      draw: 30, heat: 300,
-    }),
-    ...battery('bRF3', 'batteryRF', {
-      label: 'STBD DRIVER FWD C', weapon: 'railgun',
-      magPos: [0, -1.8, -18], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
-      rounds: 1600, cookoff: 9.0e8,
-      hoistPos: [-5, 0, -10], hoistHp: 3.6e6,
-      gunPos: [3, 3.4, -14], gunHp: 4.0e7,
-      from: 'p.stbd', data: 'd.fireR', cool: 'l.batF', dir: [-0.94, 0, 0.34], arc: 0.82,
-      draw: 30, heat: 300,
-    }),
-    ...battery('bLA2', 'batteryLA', {
-      label: 'PORT DRIVER AFT B', weapon: 'railgun',
-      magPos: [0, -1.8, 8], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
-      rounds: 1600, cookoff: 9.0e8,
-      hoistPos: [5, 0, 4], hoistHp: 3.6e6,
-      gunPos: [-3, 3.4, 0], gunHp: 4.0e7,
-      from: 'p.port', data: 'd.fireL', cool: 'l.batA', dir: [0.94, 0, 0.34], arc: 0.82,
-      draw: 30, heat: 300,
-    }),
-    ...battery('bLA3', 'batteryLA', {
-      label: 'PORT DRIVER AFT C', weapon: 'railgun',
-      magPos: [0, -1.8, -18], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
-      rounds: 1600, cookoff: 9.0e8,
-      hoistPos: [5, 0, -10], hoistHp: 3.6e6,
-      gunPos: [-3, 3.4, -14], gunHp: 4.0e7,
-      from: 'p.port', data: 'd.fireL', cool: 'l.batA', dir: [0.94, 0, 0.34], arc: 0.82,
-      draw: 30, heat: 300,
-    }),
-    ...battery('bRA2', 'batteryRA', {
-      label: 'STBD DRIVER AFT B', weapon: 'railgun',
-      magPos: [0, -1.8, 8], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
-      rounds: 1600, cookoff: 9.0e8,
-      hoistPos: [-5, 0, 4], hoistHp: 3.6e6,
-      gunPos: [3, 3.4, 0], gunHp: 4.0e7,
-      from: 'p.stbd', data: 'd.fireR', cool: 'l.batA', dir: [-0.94, 0, 0.34], arc: 0.82,
-      draw: 30, heat: 300,
-    }),
-    ...battery('bRA3', 'batteryRA', {
-      label: 'STBD DRIVER AFT C', weapon: 'railgun',
-      magPos: [0, -1.8, -18], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
-      rounds: 1600, cookoff: 9.0e8,
-      hoistPos: [-5, 0, -10], hoistHp: 3.6e6,
-      gunPos: [3, 3.4, -14], gunHp: 4.0e7,
-      from: 'p.stbd', data: 'd.fireR', cool: 'l.batA', dir: [-0.94, 0, 0.34], arc: 0.82,
-      draw: 30, heat: 300,
-    }),
-
+    // Wide-training turrets instead of a second broadside.
+    //
+    // Eight more drivers were fitted here to give the dreadnought a broadside
+    // to match the cruiser's, and it could not fly one: at 4.7 degrees per
+    // second of yaw it never reached the 71 degree aspect its own guns wanted,
+    // held 34, and brought two of fifteen guns to bear. A hull you cannot turn
+    // does not solve its problem with more guns on the beam — it solves it with
+    // turrets that cover more sky, which is why real capital ships carry
+    // barbettes with enormous training arcs. The four wing mounts traverse 76
+    // degrees now and the extra drivers are gone.
     hp_('hp_tor', 'TORPEDO TUBES', 'magdeck', [0, -6, 18], {
       weapon: 'torpedo', mount: 'large', dir: [0, -0.03, 1], arc: 0.22,
       needs: { power: 'p.fwd', data: 'd.main' , coolant: 'l.core' }, feed: 'mag_tor',

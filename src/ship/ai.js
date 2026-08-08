@@ -16,6 +16,14 @@ import { clamp, clamp01, damp, rand, interceptTime } from '../core/mathx.js';
 
 const _v = new THREE.Vector3();
 const _sep = new THREE.Vector3();
+/**
+ * How far past the nose a target must get before a broadside ship changes
+ * shoulders. About thirty degrees — enough that ordinary jinking never triggers
+ * a reversal, since swapping beams costs the whole battery its line for the
+ * length of the turn.
+ */
+const BEAM_SWAP = 0.55;
+
 const _local = new THREE.Vector3();
 const _lead = new THREE.Vector3();
 const _qi = new THREE.Quaternion();
@@ -61,6 +69,8 @@ export class Pilot {
     /** Set once running has failed; from then on it fights where it stands. */
     this.lastStand = false;
     this.triggers = [false, false];
+    /** Which shoulder is offered to the target; latched, see `_steer`. */
+    this.beamSide = 0;
     this._shouldFire = (m) => this.triggers[
       (m.turret || m.weapon.kind === 'missile') ? 1 : 0
     ];
@@ -254,7 +264,25 @@ export class Pilot {
     // nearest to is the one to offer — swapping sides mid-fight just spins.
     const aspect = holdAspect ? this.ship.hull.fightAspect : 0;
     if (aspect > 0.01) {
-      yawErr -= yawErr >= 0 ? aspect : -aspect;
+      // Commit to a beam and STAY on it.
+      //
+      // Choosing the nearer side afresh every frame is what the comment above
+      // warned about and what the code then did: the instant the target drifted
+      // across the nose the demand jumped to the other beam, the ship turned
+      // back, and it crossed again. Both broadside hulls ended up parked
+      // halfway between the bow and the aspect they wanted — the worst bearing
+      // available, too far off for the chase guns and not far enough for the
+      // battery. Measured: a dreadnought asking for 71 degrees held 51 and got
+      // two of its fifteen guns onto the target.
+      //
+      // The target has to get well past the nose on the other side before the
+      // ship will change shoulders, which is also how you would actually fly it.
+      if (this.beamSide === 0
+        || (this.beamSide > 0 && yawErr < -BEAM_SWAP)
+        || (this.beamSide < 0 && yawErr > BEAM_SWAP)) {
+        this.beamSide = yawErr >= 0 ? 1 : -1;
+      }
+      yawErr -= this.beamSide * aspect;
     }
     const pitchErr = Math.atan2(_local.y, Math.hypot(_local.x, _local.z));
     const g = 1.35 * this.reflex;
@@ -409,12 +437,33 @@ export class Pilot {
     if (d < this._minRange() * 1.2 && closing > 0) {
       want = Math.min(want, -0.2);   // never drive forward into a collision
     }
-    cmd.throttle = damp(cmd.throttle, want, 2.5, dt);
+    // Range is held along the LINE OF SIGHT, not along the nose.
+    //
+    // The main drive pushes where the ship is pointing, and a broadside hull
+    // deliberately points 63 to 71 degrees away from what it is shooting at. So
+    // throttle stopped controlling range for those ships and started controlling
+    // tangential speed: the controller saw the gap widening, commanded more
+    // throttle, and drove them further off. Two capital ships opened from 5.7 km
+    // to 13.8 km and stopped fighting each other entirely, which is where the
+    // draws came from.
+    //
+    // Resolving the demand into the axes the ship actually has costs nothing for
+    // a nose-fighter — its line of sight IS its nose, so this reduces to the old
+    // behaviour — and gives a broadside ship the lateral thrust it needs to hold
+    // station on a target it is presenting its flank to.
+    _qi.copy(this.ship.body.quat).invert();
+    _local.copy(_v).applyQuaternion(_qi);
+    cmd.throttle = damp(cmd.throttle, clamp(want * _local.z, -0.45, 1), 2.5, dt);
     cmd.boost = false;
 
-    // Weave across the line of sight so it is not a stationary gun platform.
+    // Weave across the line of sight so it is not a stationary gun platform,
+    // laid over the station-keeping rather than replacing it. `strafeX` pushes
+    // to STARBOARD, which is -X in this frame, so closing on a target off the
+    // port bow is a negative deflection.
     const t = performance.now() * 0.001;
-    cmd.strafeX = Math.sin(t * 0.9 * this.reflex + this.ship.id) * 0.7 * this.aggression;
+    const hold = clamp(-want * _local.x, -1, 1);
+    cmd.strafeX = clamp(hold
+      + Math.sin(t * 0.9 * this.reflex + this.ship.id) * 0.45 * this.aggression, -1, 1);
     cmd.strafeY = Math.cos(t * 0.7 * this.reflex + this.ship.id * 1.7) * 0.45;
 
     const seen = this.lastSeenAge < 1.2;
