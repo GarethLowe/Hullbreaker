@@ -691,14 +691,16 @@ for (const [id, h] of Object.entries(HULLS)) {
   const crew = new Crew(HULLS.meridian, sys);
   run(sys, 0.5, crew);
   const helm = crew.divisions.find((d) => d.role === 'pilot');
+  const helmStrength = () => Crew.strength(helm);
+  const helmMax = helm.max;
   ok('the bridge watch is not in suits', !helm.suited);
   sys.section('bridge').atmo = 0;
   sys.section('bridge').breached = true;
   sys.section('bridge').breachSize = 1;
   run(sys, 14, crew);
   ok('vacuum thins or drives off an unsuited bridge watch',
-    helm.size < helm.max || helm.at !== 'bridge',
-    `size=${helm.size.toFixed(0)}/${helm.max} at=${helm.at}`);
+    helmStrength() < helmMax || helm.parties.some((q) => q.at !== 'bridge'),
+    `size=${helmStrength().toFixed(0)}/${helmMax}`);
   ok('losing the bridge costs the ship its helm station', crew.station('pilot') < 0.9);
 }
 {
@@ -874,6 +876,100 @@ for (const [id, h] of Object.entries(HULLS)) {
     `${all.demand.toFixed(0)} vs ${rest.demand.toFixed(0)} MW at rest`);
 }
 
+// --- damage control works in parties, not as a mob --------------------------
+// A division is an establishment, not a body of people who all walk to the same
+// hatch. Treating it as one unit that takes ONE job meant a seventy-hand
+// division put at most HANDS_PER_JOB onto a single repair and the rest stood at
+// their station: measured on a cruiser with seventeen outstanding jobs, three
+// of eight divisions tasked and forty-two hands working out of four hundred and
+// twenty aboard.
+{
+  const hull = HULLS.meridian;
+  const sys = new Systems(hull);
+  const crew = new Crew(hull, sys);
+  run(sys, 2, crew);
+  ok('a division is made of several parties',
+    crew.divisions.every((d) => d.parties.length > 1),
+    crew.divisions.map((d) => `${d.name}:${d.parties.length}`).join(' '));
+  ok('and the parties add up to the establishment',
+    crew.divisions.every((d) => Math.abs(Crew.strength(d) - d.max) < 1e-6));
+
+  // Damage spread across the ship, so there is plenty to be getting on with.
+  for (const id of ['c_dorsal', 'c_keel', 'rad_LF', 'rad_RA', 'sensor', 'pump_aux',
+    'l_fwd', 'c_data_fireF', 'thruster_A', 'lifesupport', 'computer_aux',
+    'rcs_wingL', 'cargo_A', 'shieldcap_f', 'pump_aft', 'c_main_batLF']) {
+    if (sys.get(id)) {
+      sys.damageModule(id, 4e6, null, null);
+    }
+  }
+  run(sys, 8, crew);
+
+  const busy = crew.parties.filter((q) => q.size > 0 && (q.task || q.heading));
+  const hands = busy.reduce((a, q) => a + q.size, 0);
+  const places = new Set(busy.map((q) => q.heading || q.at));
+  ok('many parties turn out, not one per division', busy.length > crew.divisions.length,
+    `${busy.length} parties working`);
+  ok('...spread over several compartments', places.size >= 4,
+    `${places.size} compartments`);
+  ok('...putting real numbers to work', hands > crew.headcount * 0.15,
+    `${hands.toFixed(0)} of ${crew.headcount} aboard`);
+  // And they must not all pile onto the same job.
+  const perJob = new Map();
+  for (const q of busy) {
+    const k = `${q.task ? q.task.kind : 'move'}:${q.task ? q.task.target : q.heading}`;
+    perJob.set(k, (perJob.get(k) || 0) + q.size);
+  }
+  ok('and no single job soaks up the whole watch',
+    Math.max(...perJob.values()) < hands * 0.75,
+    [...perJob.entries()].map(([k, v]) => `${k}=${v.toFixed(0)}`).join(' '));
+}
+
+// --- a wreck turns its whole crew to recovery -------------------------------
+// Holding a post is right while the ship can still use it: a gunnery deck that
+// leaves its mounts stops shooting. On a hull shot to a standstill it is the
+// wrong answer — a disabled ship sat with its engineering watch at a station
+// that no longer did anything while it span and two damage-control divisions
+// tried to recover it alone. Stations keep a skeleton and the rest turn to.
+{
+  const hull = HULLS.halberd;
+  const sys = new Systems(hull);
+  const crew = new Crew(hull, sys);
+  run(sys, 2, crew);
+  const outNow = () => crew.parties.filter((q) => q.size > 0 && (q.task || q.heading));
+  const stationRoles = crew.divisions.filter((d) => d.role !== 'damage');
+
+  for (const id of ['thruster_A', 'thruster_B', 'rcs_fwd', 'rcs_aft', 'computer',
+    'c_react_main', 'l_fwd', 'pump_aux', 'rad_LF', 'sensor', 'shieldgen', 'lifesupport']) {
+    if (sys.get(id)) {
+      sys.damageModule(id, 1e12, null, null);
+    }
+  }
+  run(sys, 10, crew);
+  ok('the ship really is disabled', sys.driveAuthority() < 0.15,
+    `${(sys.driveAuthority() * 100).toFixed(0)}% drive authority`);
+
+  const out = outNow();
+  const hands = out.reduce((a, q) => a + q.size, 0);
+  ok('a wreck turns nearly everybody to recovery',
+    hands > crew.headcount * 0.6, `${hands.toFixed(0)} of ${crew.headcount}`);
+  ok('...including the station watches, not just damage control',
+    stationRoles.some((d) => d.parties.some((q) => q.size > 0 && (q.task || q.heading))));
+  // A station that is on fire or open to space is abandoned outright, and
+  // should be — the skeleton only applies where there is still a post to stand
+  // at. On this wreck the bridge itself is uninhabitable.
+  const habitable = stationRoles.filter((d) => crew._tenable(d.station)
+    && d.parties.some((q) => q.size > 0));
+  // Manning the post means BEING there, not being idle: the skeleton party is
+  // free to work a repair inside its own compartment, which is exactly what a
+  // watch left behind would do.
+  ok('...but a habitable station keeps somebody standing on it',
+    habitable.length > 0
+      && habitable.every((d) => d.parties.some((q) => q.size > 0 && q.at === d.station
+        && !q.heading)),
+    habitable.filter((d) => !d.parties.some((q) => q.size > 0 && q.at === d.station
+      && !q.heading)).map((d) => d.name).join(', ') || 'none');
+}
+
 // --- the ship cross-decks to stay in the fight ------------------------------
 // A warship does not write off a battery because the people standing in it were
 // killed. Without this a single hit that emptied a gunnery deck cost those guns
@@ -892,22 +988,24 @@ for (const [id, h] of Object.entries(HULLS)) {
   const victim = gunners.find((d) => d.station === 'batteryRF') || gunners[0];
   sys.punchHole(victim.station, 6);
   crew.killIn(victim.station, 60);
-  ok('the hit really did empty that station', victim.size < 1, `${victim.size}`);
+  const vs = () => Crew.strength(victim);
+  ok('the hit really did empty that station', vs() < 1, `${vs()}`);
 
   // While it is still open to space, nobody is posted in.
   run(sys, 40, crew);
   if (sys.section(victim.station).atmo <= ATMO_CRITICAL) {
-    ok('nobody is posted into a compartment still open to space', victim.size < 1,
-      `${victim.size.toFixed(0)} hands in vacuum`);
+    ok('nobody is posted into a compartment still open to space', vs() < 1,
+      `${vs().toFixed(0)} hands in vacuum`);
   }
 
   run(sys, 600, crew);
-  ok('once it is sealed, hands cross-deck into it', victim.size > victim.max * 0.4,
-    `${victim.size.toFixed(0)}/${victim.max}`);
+  ok('once it is sealed, hands cross-deck into it', vs() > victim.max * 0.4,
+    `${vs().toFixed(0)}/${victim.max}`);
   ok('...so the guns can be laid again', crew.station('gunner') > 0.5,
     `${(crew.station('gunner') * 100).toFixed(0)}%`);
   // Nobody is stripped bare to do it.
-  const floor = Math.min(...crew.divisions.filter((d) => d.size > 0).map((d) => d.size / d.max));
+  const floor = Math.min(...crew.divisions
+    .map((d) => Crew.strength(d) / d.max).filter((f) => f > 0));
   ok('and no station is stripped bare to man another', floor > 0.5, `${floor.toFixed(2)}`);
   // It cannot conjure people.
   ok('cross-decking moves hands, it does not make them',
@@ -1110,7 +1208,9 @@ for (const [id, h] of Object.entries(HULLS)) {
     run(sys, 1, crew);
     if (killCrew) {
       for (const d of crew.members) {
-        d.size = 0;
+        for (const q of d.parties) {
+          q.size = 0;
+        }
       }
     }
     const body = new Body(HULLS.meridian);

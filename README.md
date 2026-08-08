@@ -512,6 +512,39 @@ that a hot reading always means damage, an overdriven duty cycle or a failing
 loop, and never merely "this is a big ship". All eighteen are on a loop now, and
 the sensors read 100% at rest on three of the four hulls.
 
+#### Damage control works in parties, not as a mob
+
+A division is an establishment — a name, a trade, a station and a headcount —
+and it was also, wrongly, a single body of people who all walked to the same
+hatch. One division took ONE job, and `HANDS_PER_JOB` capped it at fourteen, so
+a seventy-hand division put fourteen onto a repair and the other fifty-six stood
+at their post. Measured on a cruiser with seventeen outstanding jobs: three of
+eight divisions tasked, **forty-two hands working out of four hundred and
+twenty**.
+
+The working unit is a party of about six now. A division owns several, each with
+its own position, route and job, and the scoring discounts a job by the hands
+already on it so parties spread across the ship instead of all converging on
+whatever scored highest. The same cruiser, same damage: **163 hands working, 28
+parties, six compartments**.
+
+A tick solves each shortest path once and shares it between every party standing
+in that compartment, which is what keeps seventy parties affordable.
+
+#### A wreck turns its crew to recovery
+
+Holding a post is right while the ship can still use it — a gunnery deck that
+leaves its mounts stops shooting, and a bridge that wanders stops steering. On a
+hull shot to a standstill it is exactly wrong: a disabled ship sat with its
+engineering watch at a station that no longer did anything while the hull span
+and two damage-control divisions tried to recover it alone.
+
+Once the ship cannot manoeuvre, or has lost half of what it is made of, each
+station keeps a skeleton and the rest turn to. A HALBERD shot to a standstill
+now puts **27 of 30 parties and 161 of its 180 hands** onto recovery, with one
+party still standing on every habitable post. A station that is on fire or open
+to space is abandoned outright, which is also correct.
+
 #### The ship cross-decks to stay in the fight
 
 A vented compartment can only be worked by the two suited damage-control

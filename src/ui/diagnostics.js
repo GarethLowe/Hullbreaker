@@ -358,7 +358,7 @@ export class Diagnostics {
       const sec = ship.hull.sectionById[c.at];
       const where = sec ? sec.label : '—';
       const state = c.alive
-        ? (c.heading ? 'MOVING' : c.task.toUpperCase())
+        ? (c.out > 0 ? `${c.task.toUpperCase()} ${c.out}/${c.parties}` : c.task.toUpperCase())
         : 'LOST';
       const cls = !c.alive ? 'dead' : (c.frac < 0.5 ? 'crit' : (c.frac < 0.85 ? 'warn' : 'ok'));
       html += `<div class="crew-row ${cls}"><span>${c.name}</span>`
@@ -561,7 +561,11 @@ export class Diagnostics {
       }
 
       // Crew, drawn last so they sit on top of the machinery they are fixing.
-      for (const c of ship.crew.divisions) {
+      //
+      // Parties, not divisions: a division works as several small parties
+      // scattered across the ship, and one dot per establishment put seventy
+      // hands on a compartment most of them were nowhere near.
+      for (const c of ship.crew.parties) {
         if (c.size <= 0) {
           continue;
         }

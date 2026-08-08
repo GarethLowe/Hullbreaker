@@ -44,6 +44,26 @@ const JOULES_PER_SPARE = 1.1e6;
 const HANDS_PER_JOB = 14;
 
 /**
+ * Hands in one working party.
+ *
+ * A division is a roster entry, not a mob that walks around together. Damage
+ * control is done by small parties spread across a ship, and treating a
+ * division as one indivisible unit that takes ONE job meant a seventy-hand
+ * division put at most `HANDS_PER_JOB` onto a single repair while the other
+ * fifty-six stood at their station. Measured on a cruiser with seventeen
+ * outstanding jobs: three of eight divisions tasked, forty-two hands working
+ * out of four hundred and twenty aboard.
+ */
+const PARTY_SIZE = 6;
+
+/**
+ * Parties a station role keeps at its post once the ship has stopped being able
+ * to fight with it. One: somebody stays on the wheel in case steerage comes
+ * back, everybody else turns to.
+ */
+const SKELETON_PARTIES = 1;
+
+/**
  * Cross-decking: hands per second that walk from a division with people to
  * spare to one that has been gutted, and how often the ship reconsiders who
  * needs them. Deliberately slow — this is a working party being told to leave
@@ -74,26 +94,57 @@ export class Crew {
   constructor(hull, systems) {
     this.hull = hull;
     this.sys = systems;
+    /**
+     * The roster. A division is an establishment — a name, a trade, a station
+     * and a headcount — and it is what the panel lists and the census counts.
+     * It does not walk anywhere itself.
+     */
     this.divisions = hull.crew.map((c) => ({
       id: c.id,
       name: c.name,
       role: c.role,
       /** Where this division is supposed to be when nothing is wrong. */
       station: c.post,
-      at: c.post,
-      heading: null,      // compartment being walked toward, or null
-      progress: 0,        // 0..1 along the current edge
-      path: [],
-      size: c.size,
       max: c.size,
       /** Suited parties survive vacuum but work slower. Damage control suit up. */
       suited: c.role === 'damage',
-      task: null,         // { kind:'repair'|'patch'|'fire', target }
-      idleT: 0,
-      casualtyAcc: 0,
-      /** Hands walking over from another division; see `_redistribute`. */
-      inbound: 0,
+      parties: [],
     }));
+
+    /**
+     * The working units. Each carries its own position, route and job, which is
+     * how a division comes to be repairing six things in five compartments at
+     * once instead of sending everybody to the same hatch.
+     */
+    this.parties = [];
+    for (const d of this.divisions) {
+      const n = Math.max(1, Math.round(d.max / PARTY_SIZE));
+      for (let i = 0; i < n; i++) {
+        const party = {
+          div: d,
+          role: d.role,
+          station: d.station,
+          suited: d.suited,
+          size: d.max / n,
+          max: d.max / n,
+          at: d.station,
+          heading: null,    // compartment being walked toward, or null
+          progress: 0,      // 0..1 along the current edge
+          path: [],
+          task: null,       // { kind:'repair'|'patch'|'fire', target }
+          // Stagger the first decision so the parties of one division do not
+          // deliberate in lockstep and all pick whatever scored highest once.
+          idleT: (i / n) * 1.5,
+          casualtyAcc: 0,
+        };
+        d.parties.push(party);
+        this.parties.push(party);
+      }
+    }
+    /** One shortest-path solve per (origin, suit) per tick, shared by parties. */
+    this._solveCache = new Map();
+    /** Hands already committed to each job this tick; see `_findJob`. */
+    this._load = new Map();
     this.events = [];
     this.complementMax = this.divisions.reduce((a, d) => a + d.max, 0);
     /** Rolling census so capability queries are O(1) for the flight model. */
@@ -110,20 +161,29 @@ export class Crew {
     return this.divisions;
   }
 
+  /** Hands on a division's books, across all of its parties. */
+  static strength(d) {
+    let n = 0;
+    for (const q of d.parties) {
+      n += q.size;
+    }
+    return n;
+  }
+
   _recount() {
     const c = { pilot: 0, gunner: 0, engineer: 0, damage: 0, alive: 0 };
-    for (const d of this.divisions) {
-      if (d.size <= 0) {
+    for (const q of this.parties) {
+      if (q.size <= 0) {
         continue;
       }
-      c.alive += d.size;
+      c.alive += q.size;
       // A station role only counts while the party is actually AT the station.
-      if (STATION_ROLES.has(d.role)) {
-        if (d.at === d.station && !d.heading) {
-          c[d.role] += d.size;
+      if (STATION_ROLES.has(q.role)) {
+        if (q.at === q.station && !q.heading) {
+          c[q.role] += q.size;
         }
       } else {
-        c[d.role] += d.size;
+        c[q.role] += q.size;
       }
     }
     this.census = c;
@@ -245,6 +305,17 @@ export class Crew {
     return path;
   }
 
+  /** `_solve` memoised for one tick. Parties cluster, so this collapses hard. */
+  _solveCached(from, suited) {
+    const k = from + '|' + (suited ? 1 : 0);
+    let r = this._solveCache.get(k);
+    if (r === undefined) {
+      r = this._solve(from, suited);
+      this._solveCache.set(k, r);
+    }
+    return r;
+  }
+
   _route(from, to, suited) {
     return this._pathFrom(this._solve(from, suited), from, to);
   }
@@ -265,6 +336,20 @@ export class Crew {
       const d = solved.dist.get(id);
       return Number.isFinite(d) ? 1 / (1 + d / TRAVERSE_TIME) : 0;
     };
+    /**
+     * How much a job is still worth given who is already on it.
+     *
+     * Without this every party picks whatever scored highest and the whole
+     * watch ends up in one compartment — which is the mob behaviour that having
+     * parties at all is meant to fix. Falls to nothing once a job has as many
+     * hands as it can use, so the next party looks elsewhere; never quite zero,
+     * so a genuinely huge job can still take a second party when there is
+     * nothing else to do.
+     */
+    const crowd = (kind, target) => {
+      const busy = this._load.get(kind + ':' + target) || 0;
+      return Math.max(0.04, 1 - busy / HANDS_PER_JOB);
+    };
 
     for (const s of sys.sections.values()) {
       const near = reach(s.id);
@@ -280,7 +365,7 @@ export class Crew {
             break;
           }
         }
-        score *= near;
+        score *= near * crowd('fire', s.id);
         if (score > bestScore) {
           best = { kind: 'fire', target: s.id };
           bestScore = score;
@@ -310,7 +395,7 @@ export class Crew {
         if (!s.breached) {
           score -= 40;    // sealed already; reframing can wait for the fires
         }
-        score *= near;
+        score *= near * crowd('patch', s.id);
         if (score > bestScore) {
           best = { kind: 'patch', target: s.id };
           bestScore = score;
@@ -344,7 +429,7 @@ export class Crew {
       if (m.kind === 'reactor' || m.kind === 'computer') {
         score += 20;
       }
-      score *= near;
+      score *= near * crowd('repair', m.id);
       if (score > bestScore) {
         best = { kind: 'repair', target: m.id, section: m.section };
         bestScore = score;
@@ -357,15 +442,26 @@ export class Crew {
   // -- tick ------------------------------------------------------------------
 
   tick(dt) {
-    for (const d of this.divisions) {
-      if (d.size <= 0) {
+    // One solve per origin per tick, shared by every party standing there, and
+    // a census of who is already on each job so parties spread across the ship
+    // instead of all converging on whatever scored highest.
+    this._solveCache.clear();
+    this._load.clear();
+    for (const q of this.parties) {
+      if (q.size > 0 && q.task) {
+        const k = q.task.kind + ':' + q.task.target;
+        this._load.set(k, (this._load.get(k) || 0) + q.size);
+      }
+    }
+    for (const q of this.parties) {
+      if (q.size <= 0) {
         continue;
       }
-      this._environment(d, dt);
-      if (d.size <= 0) {
+      this._environment(q, dt);
+      if (q.size <= 0) {
         continue;
       }
-      this._act(d, dt);
+      this._act(q, dt);
     }
     this._redistribute(dt);
     this._recount();
@@ -402,7 +498,7 @@ export class Crew {
     let need = null;
     let worst = REINFORCE_NEED;
     for (const d of this.divisions) {
-      const frac = d.max > 0 ? d.size / d.max : 1;
+      const frac = d.max > 0 ? Crew.strength(d) / d.max : 1;
       if (frac < worst && this._tenable(d.station)) {
         worst = frac;
         need = d;
@@ -418,16 +514,20 @@ export class Crew {
     let donor = null;
     let best = 0;
     for (const d of this.divisions) {
-      if (d === need || d.size <= 0) {
+      const strength = Crew.strength(d);
+      if (d === need || strength <= 0) {
         continue;
       }
-      const spare = d.size - d.max * REINFORCE_FLOOR;
+      const spare = strength - d.max * REINFORCE_FLOOR;
       if (spare <= 0.5) {
         continue;
       }
       const score = spare * (d.role === need.role ? 2.2 : 1);
       // They have to be able to get there from where they actually are.
-      if (score > best && Number.isFinite(this._solve(d.at, d.suited).dist.get(need.station))) {
+      // Reachable from where the division's people actually are.
+      const home = d.parties.find((q) => q.size > 0) || d.parties[0];
+      if (score > best
+        && Number.isFinite(this._solveCached(home.at, d.suited).dist.get(need.station))) {
         best = score;
         donor = d;
       }
@@ -436,13 +536,24 @@ export class Crew {
       return;
     }
     const moved = Math.min(REINFORCE_RATE * REINFORCE_INTERVAL,
-      donor.size - donor.max * REINFORCE_FLOOR, need.max - need.size);
+      Crew.strength(donor) - donor.max * REINFORCE_FLOOR,
+      need.max - Crew.strength(need));
     if (moved <= 0.01) {
       return;
     }
-    donor.size -= moved;
-    need.size += moved;
-    need.inbound = moved;
+    // Taken off the donor's fullest party and posted to the receiver's
+    // emptiest, which is how a party that was wiped out gets re-formed at its
+    // own station rather than the hands vanishing into an average.
+    const from = donor.parties.reduce((a, q) => (q.size > a.size ? q : a), donor.parties[0]);
+    const to = need.parties.reduce((a, q) => (q.size < a.size ? q : a), need.parties[0]);
+    from.size -= moved;
+    if (to.size <= 0.01) {
+      to.at = need.station;
+      to.heading = null;
+      to.path = [];
+      to.task = null;
+    }
+    to.size += moved;
     this.events.push({ type: 'crossDeck', from: donor, to: need, hands: moved });
   }
 
@@ -451,19 +562,26 @@ export class Crew {
    * `lethality` is the fraction of anyone present who is lost.
    */
   killIn(sectionId, lethality = 1) {
-    for (const d of this.divisions) {
-      if (d.size <= 0 || d.at !== sectionId) {
+    // Whoever is standing in it, party by party. A division no longer occupies
+    // one compartment, so a blast takes the working parties that happen to be
+    // in the room rather than an entire establishment wherever it is.
+    const hit = new Map();
+    for (const q of this.parties) {
+      if (q.size <= 0 || q.at !== sectionId) {
         continue;
       }
-      const lost = Math.min(d.size, d.size * clamp01(lethality));
-      d.size -= lost;
+      const lost = Math.min(q.size, q.size * clamp01(lethality));
+      q.size -= lost;
+      hit.set(q.div, (hit.get(q.div) || 0) + lost);
+      if (q.size < 0.5) {
+        this._wipe(q, 'blast');
+      }
+    }
+    for (const [d, lost] of hit) {
       if (lost >= 1) {
         this.events.push({
           type: 'casualties', division: d, lost: Math.round(lost), cause: 'blast',
         });
-      }
-      if (d.size < 0.5) {
-        this._wipe(d, 'blast');
       }
     }
   }
@@ -472,7 +590,12 @@ export class Crew {
     d.size = 0;
     d.task = null;
     d.heading = null;
-    this.events.push({ type: 'divisionLost', division: d, cause });
+    d.path = [];
+    // Only worth reporting when it takes the whole establishment with it. One
+    // six-hand party being lost is what `casualties` already says.
+    if (Crew.strength(d.div) < 0.5) {
+      this.events.push({ type: 'divisionLost', division: d.div, cause });
+    }
   }
 
   _environment(d, dt) {
@@ -500,7 +623,7 @@ export class Crew {
     d.casualtyAcc += before - d.size;
     if (d.casualtyAcc >= 5) {
       this.events.push({
-        type: 'casualties', division: d, lost: Math.round(d.casualtyAcc),
+        type: 'casualties', division: d.div, lost: Math.round(d.casualtyAcc),
         cause: s.fire > 0 ? 'fire' : 'vacuum',
       });
       d.casualtyAcc = 0;
@@ -539,16 +662,18 @@ export class Crew {
         return;
       }
       d.idleT = 0.8;
-      const solved = this._solve(d.at, d.suited);
+      const solved = this._solveCached(d.at, d.suited);
       const job = this._findJob(d, solved);
       const holdsStation = STATION_ROLES.has(d.role);
-      const stationSafe = holdsStation && this._tenable(d.station);
+      const stationSafe = holdsStation && this._tenable(d.station)
+        && this._worthManning(d);
 
       if (stationSafe) {
         // Hold the post. Take a job only if it is in this very compartment —
         // the bridge watch does not leave the helm to go and weld two rooms
         // away, and a ship that lets them stops steering.
         d.task = job && (job.section || job.target) === d.at ? job : null;
+        this._book(d);
         if (!d.task) {
           if (d.at !== d.station) {
             this._walk(d, solved, d.station);
@@ -557,6 +682,7 @@ export class Crew {
         }
       } else {
         d.task = job;
+        this._book(d);
         if (!d.task) {
           // Nothing to do and nowhere safe to stand: move somewhere survivable.
           if (!this._tenable(d.at)) {
@@ -661,6 +787,47 @@ export class Crew {
     }
   }
 
+  /**
+   * Record a party's commitment against its job for the rest of this tick.
+   *
+   * The load census is built once at the top of `tick`, so without this every
+   * party deciding on the same tick would see an empty board and pick the same
+   * job — they would only discover each other a frame later, by which point
+   * they are all walking to the same compartment.
+   */
+  _book(d) {
+    if (!d.task) {
+      return;
+    }
+    const k = d.task.kind + ':' + d.task.target;
+    this._load.set(k, (this._load.get(k) || 0) + d.size);
+  }
+
+  /**
+   * Is this party's station still worth standing at?
+   *
+   * Holding a post is right while the ship can still use it — a gunnery deck
+   * that leaves its mounts stops shooting, and a bridge that wanders stops
+   * steering, which is why station roles only take jobs in their own
+   * compartment. On a ship that has been shot to a standstill it is the wrong
+   * answer entirely: a disabled hull would sit with seventeen hands in
+   * engineering and its whole watch at posts that no longer do anything, while
+   * the ship span and the two damage-control divisions tried to recover it
+   * alone.
+   *
+   * So once the ship can no longer manoeuvre, or has lost half of what it is
+   * made of, a station keeps a skeleton and the rest turn to. That is what a
+   * crew would actually do, and it is the difference between a wreck that gets
+   * its drives back and one that drifts.
+   */
+  _worthManning(d) {
+    const crippled = this.sys.driveAuthority() < 0.15 || this.sys.integrity < 0.5;
+    if (!crippled) {
+      return true;
+    }
+    return d.div.parties.indexOf(d) < SKELETON_PARTIES;
+  }
+
   _tenable(sectionId) {
     const s = this.sys.section(sectionId);
     return !!s && s.fire <= 0 && s.atmo > ATMO_CRITICAL;
@@ -693,7 +860,7 @@ export class Crew {
   }
 
   _goTo(d, sectionId) {
-    return this._walk(d, this._solve(d.at, d.suited), sectionId);
+    return this._walk(d, this._solveCached(d.at, d.suited), sectionId);
   }
 
   drainEvents() {
@@ -702,19 +869,41 @@ export class Crew {
     return e;
   }
 
-  /** Compact roster for the damage-control panel. */
+  /**
+   * Compact roster for the damage-control panel.
+   *
+   * A division is in several places at once now, so "where" is the compartment
+   * holding most of its people and "state" is what most of its parties are
+   * doing — with a count of how many are away from the station, which is the
+   * number that actually tells you whether the ship is working on its damage.
+   */
   roster() {
-    return this.divisions.map((d) => ({
-      name: d.name,
-      role: d.role,
-      size: Math.round(d.size),
-      max: d.max,
-      alive: d.size > 0,
-      frac: d.max > 0 ? clamp01(d.size / d.max) : 0,
-      at: d.at,
-      heading: d.heading,
-      task: d.task ? d.task.kind : (d.at === d.station ? 'station' : 'idle'),
-    }));
+    return this.divisions.map((d) => {
+      const size = Crew.strength(d);
+      const live = d.parties.filter((q) => q.size > 0);
+      const byWhere = new Map();
+      const byTask = new Map();
+      for (const q of live) {
+        byWhere.set(q.at, (byWhere.get(q.at) || 0) + q.size);
+        const k = q.heading ? 'moving' : (q.task ? q.task.kind : 'station');
+        byTask.set(k, (byTask.get(k) || 0) + q.size);
+      }
+      const top = (m, fallback) => [...m.entries()]
+        .sort((a, b) => b[1] - a[1])[0]?.[0] ?? fallback;
+      return {
+        name: d.name,
+        role: d.role,
+        size: Math.round(size),
+        max: d.max,
+        alive: size > 0,
+        frac: d.max > 0 ? clamp01(size / d.max) : 0,
+        at: top(byWhere, d.station),
+        /** Parties away from their own station, working. */
+        out: live.filter((q) => q.task || q.heading).length,
+        parties: live.length,
+        task: top(byTask, 'station'),
+      };
+    });
   }
 }
 
