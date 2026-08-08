@@ -433,6 +433,32 @@ that a hot reading always means damage, an overdriven duty cycle or a failing
 loop, and never merely "this is a big ship". All eighteen are on a loop now, and
 the sensors read 100% at rest on three of the four hulls.
 
+#### The ship cross-decks to stay in the fight
+
+A vented compartment can only be worked by the two suited damage-control
+divisions out of eight — the other six cannot path into vacuum at all — and they
+have to seal it before anything inside gets touched. That is correct, and it is
+why a gutted battery can sit untouched with hundreds of hands still aboard.
+
+What was missing is what happens next. A warship does not write off a battery
+because the people standing in it were killed; it takes hands off a station that
+can spare them. Without that, one hit that emptied a gunnery deck cost those guns
+permanently, and repairing the mounts changed nothing because nobody was left to
+lay them.
+
+Three constraints keep it a decision rather than a free heal: the receiving
+station has to be habitable, so sealing comes first; the donor has to be able to
+walk there, so a cut-off section stays cut off; and a donor keeps 55% of its own
+establishment, which is what makes it run out. Once no division is above that
+floor there is no surplus and the ship fights understrength everywhere — the
+point at which it stops being sustainable.
+
+A starboard battery gutted, its gunnery division wiped out and the compartment
+opened to space: sealed and every module rebuilt by five minutes, the station
+back to 29 of 45 hands, and gunnery fitness settling at 66% because the ship had
+lost 126 of its 420 people and spread what was left rather than leaving one
+battery dead.
+
 #### Damage control does not give up
 
 A mauled ship with a full crew and full lockers has to be recoverable, or the

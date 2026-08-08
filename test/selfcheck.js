@@ -783,6 +783,46 @@ for (const [id, h] of Object.entries(HULLS)) {
       && [...all.modules.values()].filter((m) => m.shed).length > 0);
 }
 
+// --- the ship cross-decks to stay in the fight ------------------------------
+// A warship does not write off a battery because the people standing in it were
+// killed. Without this a single hit that emptied a gunnery deck cost those guns
+// permanently however many hundreds of hands were still aboard, and repairing
+// the mounts changed nothing because nobody was left to lay them.
+//
+// Order matters: seal the compartment, THEN post people into it. And it has to
+// run out — a donor keeps its own floor, so once nothing is above that floor
+// the ship simply fights understrength everywhere.
+{
+  const hull = HULLS.meridian;
+  const sys = new Systems(hull);
+  const crew = new Crew(hull, sys);
+  run(sys, 2, crew);
+  const gunners = crew.divisions.filter((d) => d.role === 'gunner');
+  const victim = gunners.find((d) => d.station === 'batteryRF') || gunners[0];
+  sys.punchHole(victim.station, 6);
+  crew.killIn(victim.station, 60);
+  ok('the hit really did empty that station', victim.size < 1, `${victim.size}`);
+
+  // While it is still open to space, nobody is posted in.
+  run(sys, 40, crew);
+  if (sys.section(victim.station).atmo <= ATMO_CRITICAL) {
+    ok('nobody is posted into a compartment still open to space', victim.size < 1,
+      `${victim.size.toFixed(0)} hands in vacuum`);
+  }
+
+  run(sys, 600, crew);
+  ok('once it is sealed, hands cross-deck into it', victim.size > victim.max * 0.4,
+    `${victim.size.toFixed(0)}/${victim.max}`);
+  ok('...so the guns can be laid again', crew.station('gunner') > 0.5,
+    `${(crew.station('gunner') * 100).toFixed(0)}%`);
+  // Nobody is stripped bare to do it.
+  const floor = Math.min(...crew.divisions.filter((d) => d.size > 0).map((d) => d.size / d.max));
+  ok('and no station is stripped bare to man another', floor > 0.5, `${floor.toFixed(2)}`);
+  // It cannot conjure people.
+  ok('cross-decking moves hands, it does not make them',
+    crew.headcount <= crew.complementMax);
+}
+
 // --- a vented compartment is still a job ------------------------------------
 // The narrow case, isolated from any cascade: one hole, nothing else wrong, and
 // enough time for the compartment to finish venting before anyone reaches it.

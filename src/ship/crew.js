@@ -43,6 +43,25 @@ const JOULES_PER_SPARE = 1.1e6;
  */
 const HANDS_PER_JOB = 14;
 
+/**
+ * Cross-decking: hands per second that walk from a division with people to
+ * spare to one that has been gutted, and how often the ship reconsiders who
+ * needs them. Deliberately slow — this is a working party being told to leave
+ * its own station and cross a damaged warship, not a number moving between two
+ * counters.
+ */
+const REINFORCE_RATE = 1.4;
+const REINFORCE_INTERVAL = 3.0;
+/**
+ * A donor never goes below this fraction of its own establishment. Stripping a
+ * station bare to man another one is how you end up with neither, and it is
+ * what makes the whole thing run out: once nobody is above the floor there is
+ * no surplus left and the ship simply fights with what it has.
+ */
+const REINFORCE_FLOOR = 0.55;
+/** Below this a station counts as needing help at all. */
+const REINFORCE_NEED = 0.85;
+
 /** Fraction of an exposed party lost per second, by cause. */
 const VACUUM_LOSS = 0.085;
 const FIRE_LOSS = 0.11;
@@ -72,6 +91,8 @@ export class Crew {
       task: null,         // { kind:'repair'|'patch'|'fire', target }
       idleT: 0,
       casualtyAcc: 0,
+      /** Hands walking over from another division; see `_redistribute`. */
+      inbound: 0,
     }));
     this.events = [];
     this.complementMax = this.divisions.reduce((a, d) => a + d.max, 0);
@@ -346,7 +367,83 @@ export class Crew {
       }
       this._act(d, dt);
     }
+    this._redistribute(dt);
     this._recount();
+  }
+
+  /**
+   * Cross-decking. Once a compartment is habitable again, hands come from
+   * somewhere else to man it.
+   *
+   * A warship does not write off a battery because the people standing in it
+   * were killed — it takes hands off a station that can spare them and puts
+   * them where the fighting needs them. Without this a single hit that emptied
+   * a gunnery deck cost the ship those guns permanently, however many hundreds
+   * of people were still aboard, and repairing the mounts changed nothing
+   * because there was nobody left to lay them.
+   *
+   * Three constraints make it a decision rather than a free heal:
+   *   - The receiving station has to be TENABLE. Sealing the compartment comes
+   *     first; nobody is posted into vacuum or fire.
+   *   - The donor has to be able to WALK there, so a cut-off section is cut off.
+   *   - The donor keeps `REINFORCE_FLOOR` of its own establishment, which is
+   *     what makes this run out. When no division is above the floor there is
+   *     no surplus, and the ship fights understrength everywhere — the point at
+   *     which it stops being sustainable.
+   */
+  _redistribute(dt) {
+    this.reinforceT = (this.reinforceT || 0) - dt;
+    if (this.reinforceT > 0) {
+      return;
+    }
+    this.reinforceT = REINFORCE_INTERVAL;
+
+    // Neediest habitable station first.
+    let need = null;
+    let worst = REINFORCE_NEED;
+    for (const d of this.divisions) {
+      const frac = d.max > 0 ? d.size / d.max : 1;
+      if (frac < worst && this._tenable(d.station)) {
+        worst = frac;
+        need = d;
+      }
+    }
+    if (!need) {
+      return;
+    }
+
+    // Best donor: most surplus, same trade preferred — a gunner cross-decked to
+    // a gun is worth more than a stoker, and the census that drives lay quality
+    // counts by role.
+    let donor = null;
+    let best = 0;
+    for (const d of this.divisions) {
+      if (d === need || d.size <= 0) {
+        continue;
+      }
+      const spare = d.size - d.max * REINFORCE_FLOOR;
+      if (spare <= 0.5) {
+        continue;
+      }
+      const score = spare * (d.role === need.role ? 2.2 : 1);
+      // They have to be able to get there from where they actually are.
+      if (score > best && Number.isFinite(this._solve(d.at, d.suited).dist.get(need.station))) {
+        best = score;
+        donor = d;
+      }
+    }
+    if (!donor) {
+      return;
+    }
+    const moved = Math.min(REINFORCE_RATE * REINFORCE_INTERVAL,
+      donor.size - donor.max * REINFORCE_FLOOR, need.max - need.size);
+    if (moved <= 0.01) {
+      return;
+    }
+    donor.size -= moved;
+    need.size += moved;
+    need.inbound = moved;
+    this.events.push({ type: 'crossDeck', from: donor, to: need, hands: moved });
   }
 
   /**
