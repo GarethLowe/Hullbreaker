@@ -355,7 +355,7 @@
   }
   .diag-row {
     display: grid;
-    grid-template-columns: 1fr 44px 62px;
+    grid-template-columns: 1fr 44px 62px 12px;
     gap: 6px;
     align-items: center;
     padding: 1px 10px;
@@ -370,6 +370,18 @@
   .diag-bar { height: 4px; background: rgba(255, 255, 255, 0.09); position: relative; }
   .diag-bar i { position: absolute; inset: 0 auto 0 0; display: block; background: currentColor; }
   .diag-val { text-align: right; color: var(--dim); font-size: 9px; }
+  /* Damage control working this module. Hidden unless a party is actually on
+     it, so the column costs nothing when the ship is sound. */
+  .diag-fix { width: 10px; height: 10px; display: block; opacity: 0; color: var(--accent); }
+  .diag-fix svg { width: 10px; height: 10px; display: block; }
+  .diag-fix.on { animation: fixpulse 1.15s ease-in-out infinite; }
+  @keyframes fixpulse {
+    0%, 100% { opacity: 0.30; transform: rotate(-12deg) scale(0.92); }
+    50%      { opacity: 1;    transform: rotate(8deg)  scale(1.06); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .diag-fix.on { animation: none; opacity: 0.95; }
+  }
   .diag-row.ok   { color: var(--ok); }
   .diag-row.warn { color: var(--warn); }
   .diag-row.crit { color: var(--crit); }

@@ -696,12 +696,30 @@ for (const [id, h] of Object.entries(HULLS)) {
   const hull = HULLS.meridian;
   const rated = hull.modules.filter((m) => m.kind === 'reactor')
     .reduce((a, m) => a + m.output, 0);
+  // Only the guns that can actually bear on ONE aspect. Since the MERIDIAN
+  // became a broadside hull, "every hardpoint at full duty" describes something
+  // the ship cannot do — half its battery is masked by its own hull at any
+  // bearing, and billing the power system for both beams at once is a load that
+  // will never exist.
+  const bearing = (() => {
+    let best = [];
+    for (let deg = 0; deg <= 180; deg += 5) {
+      const th = (deg * Math.PI) / 180;
+      const aim = new Vector3(Math.sin(th), 0, Math.cos(th));
+      const borne = hull.hardpoints.filter((m) => {
+        const rest = new Vector3(...m.dir).normalize();
+        return Math.acos(Math.max(-1, Math.min(1, rest.dot(aim)))) <= m.arc + 1e-9;
+      }).map((m) => m.id);
+      if (borne.length > best.length) { best = borne; }
+    }
+    return new Set(best);
+  })();
   const load = (sc) => {
     const sys = new Systems(hull);
     for (let i = 0; i < 300 * 60; i++) {
       for (const m of sys.modules.values()) {
         if (m.kind === 'thruster' || m.kind === 'rcs') { m.duty = sc.drive; }
-        if (m.kind === 'hardpoint') { m.duty = sc.guns; }
+        if (m.kind === 'hardpoint') { m.duty = bearing.has(m.id) ? sc.guns : 0; }
       }
       if (sc.incoming) {
         for (const f of ['fore', 'port', 'dorsal']) {
@@ -1312,27 +1330,60 @@ for (const [id, h] of Object.entries(HULLS)) {
       worst < 1e-9, `worst error ${worst.toExponential(2)}`);
   }
 
-  // Every mount has to be able to point at what the ship is pointing at.
+  // Every gun has to be able to join a fight the ship can actually have.
   //
-  // The MERIDIAN and BASTION each carried a dorsal repeater aimed up and AFT:
-  // 135 degrees off the bow with a 75 degree traverse, so sixty degrees of sky
-  // stood between it and the boresight and it could not engage anything the
-  // reticle was on. Triggering the point-defence group fired one third of it
-  // into empty space, every time.
+  // The original form of this asserted every mount could traverse onto the
+  // BORESIGHT, which caught the real bug — two dorsal repeaters aimed up and
+  // aft, 135 degrees off the bow with a 75 degree arc, sixty degrees short of
+  // ever bearing on anything the reticle was on. But it also hard-coded a
+  // nose-fighting roster, and a broadside ship's main battery is supposed to be
+  // unable to point forward. The invariant that survives the doctrine is: there
+  // has to BE an aspect where the ship brings its weight to bear, and no gun may
+  // be aimed somewhere it can never join in.
+  //
+  // Point defence is exempt: it lays itself at ordnance and is deliberately
+  // fitted to cover arcs the gunnery cannot.
   {
-    let worst = -1e9;
-    let worstId = '';
-    for (const hull of Object.values(HULLS)) {
-      for (const def of hull.hardpoints) {
-        const off = Math.acos(new Vector3(...def.dir).normalize().z);
-        if (off - def.arc > worst) {
-          worst = off - def.arc;
-          worstId = `${hull.id}/${def.id}`;
+    const dpsOf = (w) => (w.kind === 'beam' ? w.dps : (w.energy * (w.rpm || 0)) / 60);
+    for (const [id, hull] of Object.entries(HULLS)) {
+      const guns = hull.hardpoints.filter((m) => !WEAPONS[m.weapon].pointDefence);
+      const total = guns.reduce((a, m) => a + dpsOf(WEAPONS[m.weapon]), 0);
+      // Sweep bearings in the yaw plane, the plane ships actually manoeuvre in.
+      let best = 0;
+      let bestAt = 0;
+      for (let deg = 0; deg <= 180; deg += 1) {
+        const th = (deg * Math.PI) / 180;
+        const aim = new Vector3(Math.sin(th), 0, Math.cos(th));
+        let borne = 0;
+        for (const m of guns) {
+          const rest = new Vector3(...m.dir).normalize();
+          if (Math.acos(Math.max(-1, Math.min(1, rest.dot(aim)))) <= m.arc + 1e-9) {
+            borne += dpsOf(WEAPONS[m.weapon]);
+          }
+        }
+        if (borne > best) {
+          best = borne;
+          bestAt = deg;
         }
       }
+      // A third, not a half. A broadside hull masks one entire beam with its
+      // own body at every bearing, and its bow guns cannot join that beam
+      // either, so the most a ship like the MERIDIAN can ever concentrate is
+      // around 40% of what it carries. Below a third and the fit is genuinely
+      // scattered — guns that never get to fire at the same thing.
+      ok(`${id}: has a fighting aspect worth turning to`, best >= total * 0.33,
+        `best ${(best / 1e6).toFixed(0)} of ${(total / 1e6).toFixed(0)} MJ/s at ${bestAt}deg`);
+
+      // And nothing is aimed where it can never contribute.
+      let worst = null;
+      for (const m of guns) {
+        const off = Math.acos(new Vector3(...m.dir).normalize().z);
+        if (off - m.arc > (120 * Math.PI) / 180) {
+          worst = m.id;
+        }
+      }
+      ok(`${id}: no gun is aimed where it can never join in`, worst === null, worst || '');
     }
-    ok('every mount can traverse onto the boresight',
-      worst <= 0, `${worstId} falls ${(worst * 57.3).toFixed(1)}deg short`);
   }
 
   // The field has to enclose the HARDWARE, not just the compartments. A gun is

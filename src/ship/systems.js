@@ -1607,11 +1607,20 @@ export class Systems {
     return n > 0 ? clamp01(acc / n) : 0;
   }
 
+  /**
+   * The best picture anything aboard can still produce.
+   *
+   * `gain` is the aperture: a main array is 1, an auxiliary is a smaller dish
+   * fitted deep in the hull as a fallback and reads correspondingly less. Taking
+   * the maximum rather than a sum is deliberate — two arrays do not see further
+   * than the better one, they just mean losing the mast is no longer the end of
+   * the ship's ability to fight.
+   */
   sensorQuality() {
     let best = 0;
     for (const m of this.modules.values()) {
       if (m.kind === 'sensor' && this.hasData(m)) {
-        best = Math.max(best, m.eff);
+        best = Math.max(best, m.eff * (m.def.gain !== undefined ? m.def.gain : 1));
       }
     }
     return best;

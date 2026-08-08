@@ -236,7 +236,7 @@ export class Pilot {
    * backwards turns the whole loop into positive feedback, and the ship spins
    * up and away instead of tracking.
    */
-  _steer(cmd, desiredDir, dt, rollToTarget = true) {
+  _steer(cmd, desiredDir, dt, rollToTarget = true, holdAspect = false) {
     _qi.copy(this.ship.body.quat).invert();
     _local.copy(desiredDir).applyQuaternion(_qi);
     if (_local.lengthSq() < 1e-8) {
@@ -245,7 +245,17 @@ export class Pilot {
     _local.normalize();
 
     // +yawErr means "bring the nose to starboard", matching cmd.yaw.
-    const yawErr = Math.atan2(-_local.x, _local.z);
+    let yawErr = Math.atan2(-_local.x, _local.z);
+    // Fly the ship its guns were built for. A hull whose main battery lives on
+    // its wings has to hold the target off the bow to bring that battery to
+    // bear, and steering everything to zero meant a broadside dreadnought
+    // presented its nose and fought with the 31 MJ/s it could point forward
+    // instead of the 76 it carries. Whichever beam the target is already
+    // nearest to is the one to offer — swapping sides mid-fight just spins.
+    const aspect = holdAspect ? this.ship.hull.fightAspect : 0;
+    if (aspect > 0.01) {
+      yawErr -= yawErr >= 0 ? aspect : -aspect;
+    }
     const pitchErr = Math.atan2(_local.y, Math.hypot(_local.x, _local.z));
     const g = 1.35 * this.reflex;
     cmd.yaw = clamp(yawErr * g, -1, 1);
@@ -385,7 +395,7 @@ export class Pilot {
     this._aimPoint(_lead);
     const dist = _lead.length();
     _lead.normalize();
-    const cos = this._steer(cmd, _lead, dt);
+    const cos = this._steer(cmd, _lead, dt, true, true);
 
     // Range hold. `closing` is how fast the gap is shrinking; damping on it
     // keeps the controller from surging in and out.
@@ -463,7 +473,7 @@ export class Pilot {
     this._aimPoint(_lead);
     const bear = _lead.length();
     _lead.normalize();
-    const cos = this._steer(cmd, _lead, dt);
+    const cos = this._steer(cmd, _lead, dt, true, true);
     cmd.throttle = damp(cmd.throttle, 0, 2, dt);
     cmd.boost = false;
     cmd.strafeX = 0;

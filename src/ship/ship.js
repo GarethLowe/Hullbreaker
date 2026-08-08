@@ -432,16 +432,22 @@ export class Ship {
 
       this.mounts.push(mount);
     }
+    // Point defence is not a weapon anybody chooses to fire. It comes out of
+    // both the player's selectable groups and the AI's triggers entirely and
+    // runs itself against inbound ordnance — see `_pointDefence`.
+    this.pdMounts = this.mounts.filter((m) => m.weapon.pointDefence);
+    const gunnery = this.mounts.filter((m) => !m.weapon.pointDefence);
+
     // The AI thinks in terms of "guns I have to point the ship at" versus
     // "guns that point themselves".
     this.fireGroups = [
-      this.mounts.filter((m) => !m.turret && m.weapon.kind !== 'missile'),
-      this.mounts.filter((m) => m.turret || m.weapon.kind === 'missile'),
+      gunnery.filter((m) => !m.turret && m.weapon.kind !== 'missile'),
+      gunnery.filter((m) => m.turret || m.weapon.kind === 'missile'),
     ];
     // The player thinks in terms of weapons. Mounts carrying the same weapon
     // fire together as one selectable group, in hull-table order.
     const byWeapon = new Map();
-    for (const m of this.mounts) {
+    for (const m of gunnery) {
       if (!byWeapon.has(m.def.weapon)) {
         byWeapon.set(m.def.weapon, []);
       }
@@ -450,6 +456,105 @@ export class Ship {
     this.weaponGroups = [...byWeapon.entries()].map(([id, mounts]) => ({
       id, name: WEAPONS[id].name, weapon: WEAPONS[id], mounts,
     }));
+  }
+
+  /**
+   * What this mount should be shooting at: the inbound warhead it can actually
+   * reach, nearest first. Hostile ordnance only — never a hull, never one of
+   * this faction's own torpedoes on their way out.
+   */
+  _pdThreat(mount) {
+    const missiles = this.game.ballistics.missiles;
+    if (missiles.length === 0) {
+      return null;
+    }
+    const reach = mount.weapon.pdRange;
+    this.localToWorld(mount.origin, _o);
+    _mnt.copy(mount.rest).applyQuaternion(this.body.quat);
+    let best = null;
+    let bestD = reach;
+    for (const m of missiles) {
+      if (m.armT > 0 || (m.owner && m.owner.faction === this.faction)) {
+        continue;
+      }
+      _v2.copy(m.pos).sub(_o);
+      const d = _v2.length();
+      if (d >= bestD || d < 1e-3) {
+        continue;
+      }
+      // It has to be inside the traverse, or the gun would train to the stop
+      // and fire into its own plating.
+      _v2.multiplyScalar(1 / d);
+      if (Math.acos(clamp(_v2.dot(_mnt), -1, 1)) > mount.def.arc) {
+        continue;
+      }
+      best = m;
+      bestD = d;
+    }
+    return best;
+  }
+
+  /**
+   * One point-defence mount, laying and firing itself. Runs instead of
+   * `_aimMount` and instead of any trigger: with nothing inbound it tracks back
+   * to its rest bearing and holds fire, which is also what stops it emptying a
+   * magazine into empty space between engagements.
+   */
+  _pointDefence(mount, dt) {
+    const w = mount.weapon;
+    const mod = mount.mod;
+    const live = mod.eff > 0.12 && !mod.destroyed && this.sys.hasData(mod);
+    mount.cool = Math.max(0, mount.cool - dt);
+    mod.duty = Math.max(0, (mod.duty || 0) - dt * 2.5);
+    mount.firing = false;
+
+    const threat = live ? this._pdThreat(mount) : null;
+    if (!threat) {
+      mount.aim.lerp(_v.copy(mount.rest).applyQuaternion(this.body.quat),
+        1 - Math.exp(-6 * dt)).normalize();
+      this._clampToMount(mount);
+      return;
+    }
+
+    // Lead it. A torpedo runs at 620 m/s and the slug at 1600, so the lead is
+    // large and getting it wrong means every round passes behind the warhead.
+    this.localToWorld(mount.origin, _o);
+    _v2.copy(threat.pos).sub(_o);
+    _d.copy(threat.vel).sub(this.velocity);
+    const t = interceptTime(_v2, _d, w.muzzleVel);
+    if (t !== null && t < 4) {
+      _v2.addScaledVector(_d, t);
+    }
+    _v2.normalize();
+    const rest = _v.copy(mount.rest).applyQuaternion(this.body.quat);
+    const dot = clamp(_v2.dot(rest), -1, 1);
+    if (Math.acos(dot) > mount.def.arc) {
+      _d.copy(_v2).addScaledVector(rest, -dot).normalize();
+      _v2.copy(rest).multiplyScalar(Math.cos(mount.def.arc))
+        .addScaledVector(_d, Math.sin(mount.def.arc));
+    }
+    // A director tracks faster than a crew lays a gun; that is what it is for.
+    mount.aim.lerp(_v2, 1 - Math.exp(-7 * dt)).normalize();
+    this._clampToMount(mount);
+
+    if (mount.cool > 0 || !this._canDraw(w.draw)) {
+      return;
+    }
+    // Only when it is genuinely pointing at the thing. A torpedo is small, so
+    // this is a tight cone rather than the generous one used against hulls —
+    // and the ammunition check comes AFTER it, because `_takeAmmo` spends the
+    // round it is asked about and a mount still slewing must not be billed for
+    // shots it never took.
+    _v2.copy(threat.pos).sub(_o).normalize();
+    if (mount.aim.dot(_v2) < Math.cos(0.035) || !this._takeAmmo(mount)) {
+      return;
+    }
+    this.sys.capStore = Math.max(0, this.sys.capStore - w.draw);
+    mount.cool = w.interval / clamp(mod.eff, 0.25, 1);
+    mod.heatAcc += w.heat * mount.scale;
+    mod.duty = 1;
+    mount.firing = true;
+    this._launch(mount, null);
   }
 
   // -- transforms ------------------------------------------------------------
@@ -1011,6 +1116,11 @@ export class Ship {
     const ball = this.game.ballistics;
     {
       for (const mount of this.mounts) {
+        // Point defence answers to nothing but the ordnance in the sky.
+        if (mount.weapon.pointDefence) {
+          this._pointDefence(mount, dt);
+          continue;
+        }
         const held = shouldFire(mount);
         this._aimMount(mount, target, dt);
         const w = mount.weapon;

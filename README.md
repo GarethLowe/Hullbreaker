@@ -2,7 +2,7 @@
 
 A browser 6DOF **capital-ship** combat simulator whose ships are **modelled
 interiors**, not health bars. Every vessel is 95 to 380 metres of pressurised
-compartments holding 38 to 83 functional components, wired together by three
+compartments holding 39 to 105 functional components, wired together by three
 utility networks — **power**, **data** and **coolant** — and crewed by hundreds
 of hands in divisions that have to walk to a problem before they can fix it.
 
@@ -18,10 +18,10 @@ propagate through a complex system over time, not to win a reflex contest.
 
 | | role | length | mass | crew | compartments | components |
 |-|-|-|-|-|-|-|
-| **SABRE** | picket | 95 m | 4,100 t | 85 | 8 | 38 |
-| **HALBERD** | line frigate | 165 m | 15,900 t | 180 | 11 | 55 |
-| **MERIDIAN** | heavy cruiser *(yours)* | 250 m | 45,500 t | 420 | 14 | 83 |
-| **BASTION** | dreadnought | 380 m | 165,900 t | 1,050 | 14 | 80 |
+| **SABRE** | picket | 95 m | 4,100 t | 85 | 8 | 39 |
+| **HALBERD** | line frigate | 165 m | 15,900 t | 180 | 11 | 56 |
+| **MERIDIAN** | heavy cruiser *(yours)* | 250 m | 45,900 t | 420 | 14 | 96 |
+| **BASTION** | dreadnought | 380 m | 165,900 t | 1,050 | 14 | 105 |
 
 Thirty seconds of cruiser gunnery into a frigate, measured: shields to 43%, nine
 compartments opened, and the frigate had lost its **sensors**, **both fuel
@@ -239,6 +239,58 @@ the homing-weapon loop that was missing — and it makes the dorsal mounts worth
 their tonnage rather than a worse broadside. Blast fragments deliberately do not
 do this: sympathetic detonation would splice the missile array from inside the
 loop already walking it, and one torpedo should not clear a salvo.
+
+#### Doctrine is a property of the hull
+
+The MERIDIAN put 130 MJ/s on its bow and 31 abeam. It was a pure nose-fighter,
+it out-gunned the dreadnought forward, and it had the only MEDIUM-armoured bow
+in the roster — 0.26 m of plate, thinner than the frigate a class below it —
+on the one compartment that eats every round of a head-on pass, holding the
+ship's only sensor. It had to nose in, everything landed on one facet, and the
+first thing through was the array that let it see.
+
+Its wings and both lances swing outboard now, with a second driver in each wing,
+and its bow is heavy armour at 0.50 m. It fights beam-on: 31 forward, 61 across
+24 to 105 degrees.
+
+That immediately broke the roster twice over, and both breaks were instructive.
+
+**A wide-arc ship beats a narrow-arc ship it can out-turn.** Rebuilt, the
+cruiser beat the dreadnought four duels out of four without taking a single hull
+hit — it simply stayed outside the BASTION's arcs. A dreadnought does not get to
+be the second-best broadside in the fleet, so it got the same doctrine at its own
+scale: eight more drivers, 76 MJ/s on a beam against the cruiser's 61.
+
+**The pilot flew every hull as a nose-fighter.** With both big ships rebuilt,
+each presented its bow and fought with the 31 MJ/s it could point forward
+instead of the 61 or 76 it carried. `fightAspect` is derived per hull from where
+its guns can actually point, and the pilot holds the target on that bearing.
+
+The first version of that derivation took the EARLIEST bearing reaching maximum
+weight, which for the cruiser is 24 degrees — one degree inside its arc limit.
+The pilot dutifully sat on the stop and the guns fell out of train on every
+overshoot: measured mid-fight, one of seven drivers bearing, 115 rounds away, the
+enemy on 99% hull. It returns the centre of the band now, and the ships fight
+where their guns are.
+
+#### Point defence lays itself
+
+A repeater is a director and a fast tracker whose entire job is killing
+warheads, and it has to react quicker than any trigger a person is holding. It
+leaves the player's selectable groups and the AI's triggers altogether and
+engages inbound torpedoes on its own inside 2.6 km — and nothing else, because
+every second spent shooting at a belt is a second with no defence against the one
+weapon that opens three compartments at once. Three torpedoes inbound, no
+triggers touched: all three killed, hull and shields untouched.
+
+#### Sensors, fitted rather than dropped on the centreline
+
+Every hull carried exactly one array, in the tip of the nose. The main array
+still looks from where it has to, but rides high in the compartment rather than
+on the axis a shot aimed at the ship's centre travels down; an auxiliary sits
+deep amidships behind the belt, on a different power bus, with a smaller
+aperture — `gain`, so a fallback lets a blinded ship fight rather than handing it
+a free second array.
 
 #### Nothing vital exists only once
 

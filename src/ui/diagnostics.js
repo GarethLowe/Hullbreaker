@@ -25,6 +25,16 @@ import { XRAY_DRAW, XRAY_HOLD, XRAY_FADE } from '../ship/ship.js';
 import { clamp01, formatRange } from '../core/mathx.js';
 import { skinFraction } from '../world/hardware.js';
 
+/**
+ * The damage-control mark. Drawn rather than typed: at nine pixels a glyph is a
+ * smudge, and this has to be recognisable in peripheral vision while something
+ * is shooting at you.
+ */
+const WRENCH = '<svg viewBox="0 0 16 16" aria-hidden="true">'
+  + '<path fill="currentColor" d="M11.4 1a4.6 4.6 0 0 0-4.3 6.2L1.5 12.8a1.4 1.4 0 '
+  + '0 0 2 2l5.6-5.6A4.6 4.6 0 1 0 11.4 1zm0 2.1c.3 0 .6 0 .9.1l-1.8 1.8a1 1 0 0 0 '
+  + '0 1.4l.7.7a1 1 0 0 0 1.4 0l1.8-1.8a2.5 2.5 0 1 1-3-2.2z"/></svg>';
+
 const LEVEL_CLASS = {
   [LEVEL.OK]: 'ok', [LEVEL.WARN]: 'warn', [LEVEL.CRIT]: 'crit', [LEVEL.DEAD]: 'dead',
 };
@@ -158,11 +168,19 @@ export class Diagnostics {
         name.textContent = m.label;
         const val = document.createElement('span');
         val.className = 'diag-val';
+        // A party actually working on this module, rather than a text suffix
+        // buried at the end of a number nobody reads mid-fight. It pulses, so
+        // the eye finds "somebody is on it" without reading anything.
+        const fix = document.createElement('span');
+        fix.className = 'diag-fix';
+        fix.innerHTML = WRENCH;
         row.appendChild(name);
         row.appendChild(bar);
         row.appendChild(val);
+        row.appendChild(fix);
         this.treeEl.appendChild(row);
-        const entry = { row, fill, val, name, shown: true };
+        const entry = { row, fill, val, name, shown: true, fixing: null };
+        entry.fix = fix;
         this._rows.set(m.id, entry);
         members.push(entry);
       }
@@ -248,9 +266,12 @@ export class Diagnostics {
         }
       }
       r.fill.style.width = `${Math.round(st.frac * 100)}%`;
-      const txt = m.repairing ? `${st.text} ·R` : st.text;
-      if (r.val.textContent !== txt) {
-        r.val.textContent = txt;
+      if (r.val.textContent !== st.text) {
+        r.val.textContent = st.text;
+      }
+      if (r.fixing !== !!m.repairing) {
+        r.fixing = !!m.repairing;
+        r.fix.classList.toggle('on', r.fixing);
       }
     }
 

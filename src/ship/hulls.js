@@ -348,9 +348,27 @@ const SABRE = {
       needs: { power: 'p.fwd', coolant: 'l.core' }, draw: 9, priority: 9,
       heat: 70, critical: true,
     }),
-    mod('sensor', 'sensor', 'SENSOR ARRAY', 'prow', [0, 1.4, 2.6], {
+    // Sensors, fitted the way a designer would rather than dropped on the
+    // centreline of the bow.
+    //
+    // Every hull carried exactly ONE array, in the tip of the nose — the single
+    // compartment that eats every round of a head-on pass. Losing it blinds the
+    // ship: no lock, no radar reach, no picture in the target view. That is a
+    // capability with no redundancy sitting in the worst place on the vessel.
+    //
+    // The main array stays forward, because that is where it has to look from,
+    // but rides HIGH in the compartment rather than on the axis a shot aimed at
+    // the ship's centre actually travels down. The auxiliary sits deep amidships
+    // behind the belt, on a different power bus, and is a smaller aperture — a
+    // fallback that lets a blinded ship still fight, not a free second array.
+    mod('sensor', 'sensor', 'SENSOR ARRAY', 'prow', [0, 1.6, 2.6], {
       half: [2.4, 1.5, 4.2], hp: 4.5e6, vuln: 1.8, sys: 'COMPUTE',
-      needs: { power: 'p.fwd', data: 'd.main' , coolant: 'l.core' }, draw: 7, priority: 7, heat: 24,
+      needs: { power: 'p.fwd', data: 'd.main', coolant: 'l.core' }, draw: 7, priority: 7, heat: 24,
+    }),
+    mod('sensor_aux', 'sensor', 'AUXILIARY ARRAY', 'spine', [0, 3.5, -2], {
+      half: [1.6, 1.0, 2.2], hp: 3.0e6, vuln: 1.6, sys: 'COMPUTE',
+      needs: { power: 'p.main', data: 'd.main', coolant: 'l.core' },
+      draw: 4, priority: 7, heat: 14, extra: { gain: 0.55 },
     }),
     cond('c_data_main', 'data', 'src.computer', 'd.main', 'bridge', [2.4, -1.6, 2], {
       label: 'AVIONICS BUS', hp: 1.0e6, vuln: 2.6, sole: true,
@@ -575,9 +593,27 @@ const HALBERD = {
       needs: { power: 'p.bridge', coolant: 'l.core' }, draw: 16, priority: 9,
       heat: 100, critical: true,
     }),
+    // Sensors, fitted the way a designer would rather than dropped on the
+    // centreline of the bow.
+    //
+    // Every hull carried exactly ONE array, in the tip of the nose — the single
+    // compartment that eats every round of a head-on pass. Losing it blinds the
+    // ship: no lock, no radar reach, no picture in the target view. That is a
+    // capability with no redundancy sitting in the worst place on the vessel.
+    //
+    // The main array stays forward, because that is where it has to look from,
+    // but rides HIGH in the compartment rather than on the axis a shot aimed at
+    // the ship's centre actually travels down. The auxiliary sits deep amidships
+    // behind the belt, on a different power bus, and is a smaller aperture — a
+    // fallback that lets a blinded ship still fight, not a free second array.
     mod('sensor', 'sensor', 'SENSOR SUITE', 'prow', [0, 2.6, 3.5], {
       half: [3.6, 2.2, 6.0], hp: 8.0e6, vuln: 1.8, sys: 'COMPUTE',
-      needs: { power: 'p.fwd', data: 'd.main' , coolant: 'l.fwd' }, draw: 12, priority: 7, heat: 32,
+      needs: { power: 'p.fwd', data: 'd.main', coolant: 'l.fwd' }, draw: 12, priority: 7, heat: 32,
+    }),
+    mod('sensor_aux', 'sensor', 'AUXILIARY ARRAY', 'spine', [0, 6.0, 4], {
+      half: [2.4, 1.4, 3.0], hp: 5.0e6, vuln: 1.6, sys: 'COMPUTE',
+      needs: { power: 'p.main', data: 'd.main', coolant: 'l.core' },
+      draw: 7, priority: 7, heat: 18, extra: { gain: 0.55 },
     }),
     cond('c_data_main', 'data', 'src.computer', 'd.main', 'bridge', [3.4, -2.4, 1], {
       label: 'AVIONICS BUS', hp: 1.3e6, vuln: 2.6, sole: true,
@@ -781,9 +817,16 @@ const MERIDIAN = {
     pitchRate: 0.150, yawRate: 0.125, rollRate: 0.25, spool: 1.9,
   },
   sections: [
+    // The nose a ship that fights bow-on actually needs.
+    //
+    // This was the only MEDIUM-armoured bow in the roster — 0.26 m and 16 MJ of
+    // plate, thinner than the frigate a class below it and less than a third of
+    // the dreadnought's — on the one compartment that eats every round of a
+    // head-on pass, holding the ship's only sensor. It sits between the HALBERD
+    // and the BASTION now, where a 250 m cruiser belongs.
     sec('bowarray', 'BOW ARRAY', [0, 0, 111.5], [11, 9, 13.5], {
-      armor: 'armorMedium', wall: 0.26, plateHp: 1.6e7, frameHp: 2.2e7,
-      density: 210, adj: ['fwdbattery'], style: 'prow',
+      armor: 'armorHeavy', wall: 0.50, plateHp: 3.0e7, frameHp: 4.0e7,
+      density: 250, adj: ['fwdbattery'], style: 'prow',
     }),
     sec('fwdbattery', 'FORWARD BATTERY', [0, 0, 85], [13, 11, 13], {
       armor: 'armorHeavy', wall: 0.50, plateHp: 3.4e7, frameHp: 4.6e7,
@@ -891,9 +934,27 @@ const MERIDIAN = {
       half: [3.0, 1.8, 2.8], hp: 1.6e7, vuln: 1.4, sys: 'COMPUTE',
       needs: { power: 'p.main', coolant: 'l.core' }, draw: 20, priority: 8, heat: 90,
     }),
-    mod('sensor', 'sensor', 'SENSOR SUITE', 'bowarray', [0, 2.6, 2.5], {
-      half: [4.4, 3.0, 7.0], hp: 1.4e7, vuln: 1.8, sys: 'COMPUTE',
-      needs: { power: 'p.fwd', data: 'd.main' , coolant: 'l.fwd' }, draw: 24, priority: 7, heat: 44,
+    // Sensors, fitted the way a designer would rather than dropped on the
+    // centreline of the bow.
+    //
+    // Every hull carried exactly ONE array, in the tip of the nose — the single
+    // compartment that eats every round of a head-on pass. Losing it blinds the
+    // ship: no lock, no radar reach, no picture in the target view. That is a
+    // capability with no redundancy sitting in the worst place on the vessel.
+    //
+    // The main array stays forward, because that is where it has to look from,
+    // but rides HIGH in the compartment rather than on the axis a shot aimed at
+    // the ship's centre actually travels down. The auxiliary sits deep amidships
+    // behind the belt, on a different power bus, and is a smaller aperture — a
+    // fallback that lets a blinded ship still fight, not a free second array.
+    mod('sensor', 'sensor', 'SENSOR SUITE', 'bowarray', [0, 3.8, 2.5], {
+      half: [4.4, 2.0, 7.0], hp: 1.4e7, vuln: 1.8, sys: 'COMPUTE',
+      needs: { power: 'p.fwd', data: 'd.main', coolant: 'l.fwd' }, draw: 24, priority: 7, heat: 44,
+    }),
+    mod('sensor_aux', 'sensor', 'AUXILIARY ARRAY', 'coredeck', [0, 4.5, -6], {
+      half: [3.0, 1.6, 4.0], hp: 9.0e6, vuln: 1.6, sys: 'COMPUTE',
+      needs: { power: 'p.main', data: 'd.main', coolant: 'l.core' },
+      draw: 13, priority: 7, heat: 24, extra: { gain: 0.55 },
     }),
     cond('c_data_main', 'data', 'src.computer', 'd.main', 'bridge', [5.0, -3.0, 2], {
       label: 'AVIONICS BUS', hp: 2.2e6, vuln: 2.6,
@@ -1095,7 +1156,7 @@ const MERIDIAN = {
       rounds: 1100, cookoff: 4.2e8,
       hoistPos: [3.4, 0, 0], hoistHp: 2.2e6,
       gunPos: [-2.0, 2.4, 8], gunHp: 2.0e7,
-      from: 'p.batLF', data: 'd.fireF', cool: 'l.batF', dir: [0.22, 0, 1], arc: 0.45,
+      from: 'p.batLF', data: 'd.fireF', cool: 'l.batF', dir: [0.94, 0, 0.34], arc: 0.82,
       draw: 24, heat: 230,
     }),
     ...battery('bRF', 'batteryRF', {
@@ -1104,7 +1165,7 @@ const MERIDIAN = {
       rounds: 1100, cookoff: 4.2e8,
       hoistPos: [-3.4, 0, 0], hoistHp: 2.2e6,
       gunPos: [2.0, 2.4, 8], gunHp: 2.0e7,
-      from: 'p.batRF', data: 'd.fireF', cool: 'l.batF', dir: [-0.22, 0, 1], arc: 0.45,
+      from: 'p.batRF', data: 'd.fireF', cool: 'l.batF', dir: [-0.94, 0, 0.34], arc: 0.82,
       draw: 24, heat: 230,
     }),
     ...battery('bLA', 'batteryLA', {
@@ -1113,7 +1174,7 @@ const MERIDIAN = {
       rounds: 600, cookoff: 3.0e8,
       hoistPos: [3.4, 0, 0], hoistHp: 2.2e6,
       gunPos: [-2.0, 2.4, 8], gunHp: 2.0e7,
-      from: 'p.batLA', data: 'd.fireA', cool: 'l.batA', dir: [0.22, 0, 1], arc: 0.45,
+      from: 'p.batLA', data: 'd.fireA', cool: 'l.batA', dir: [0.94, 0, 0.34], arc: 0.82,
       draw: 34, heat: 300,
     }),
     ...battery('bRA', 'batteryRA', {
@@ -1122,13 +1183,60 @@ const MERIDIAN = {
       rounds: 600, cookoff: 3.0e8,
       hoistPos: [-3.4, 0, 0], hoistHp: 2.2e6,
       gunPos: [2.0, 2.4, 8], gunHp: 2.0e7,
-      from: 'p.batRA', data: 'd.fireA', cool: 'l.batA', dir: [-0.22, 0, 1], arc: 0.45,
+      from: 'p.batRA', data: 'd.fireA', cool: 'l.batA', dir: [-0.94, 0, 0.34], arc: 0.82,
       draw: 34, heat: 300,
     }),
     mod('mag_tor', 'magazine', 'TORPEDO STOWAGE', 'magdeck', [0, 0, 0], {
       half: [8.0, 3.0, 7.0], hp: 2.2e7, vuln: 1.8, sys: 'ORDNANCE',
       extra: { rounds: 60, cookoff: 9.0e8 },
     }),
+    // A second driver in each wing. A broadside ship that can only bring two
+    // guns and a lance to bear is not a broadside ship, it is a nose-fighter
+    // with its guns pointed the wrong way: the beam weight came to 34 MJ/s
+    // against the 130 this hull used to put on the bow. Four more mounts take a
+    // full broadside to 61, which is a real main battery and still short of the
+    // dreadnought's 76 on its own best aspect — a cruiser should not eclipse it.
+    //
+    // Aft in each wing, with their own magazines. That is more ordnance stowed
+    // in thin-skinned compartments hanging off the sides of the ship, which is
+    // exactly the bargain a broadside hull makes.
+    ...battery('bLF2', 'batteryLF', {
+      label: 'PORT BROADSIDE FWD B', weapon: 'railgun',
+      magPos: [0, -1.0, 5], magHalf: [2.6, 1.0, 4.0], magHp: 1.2e7,
+      rounds: 1100, cookoff: 4.2e+08,
+      hoistPos: [3.4, 0, 4], hoistHp: 2.0e6,
+      gunPos: [-2.0, 2.4, -9], gunHp: 2.0e7,
+      from: 'p.batLF', data: 'd.fireF', cool: 'l.batF', dir: [0.94, 0, 0.34], arc: 0.82,
+      draw: 24, heat: 230,
+    }),
+    ...battery('bRF2', 'batteryRF', {
+      label: 'STBD BROADSIDE FWD B', weapon: 'railgun',
+      magPos: [0, -1.0, 5], magHalf: [2.6, 1.0, 4.0], magHp: 1.2e7,
+      rounds: 1100, cookoff: 4.2e+08,
+      hoistPos: [-3.4, 0, 4], hoistHp: 2.0e6,
+      gunPos: [2.0, 2.4, -9], gunHp: 2.0e7,
+      from: 'p.batRF', data: 'd.fireF', cool: 'l.batF', dir: [-0.94, 0, 0.34], arc: 0.82,
+      draw: 24, heat: 230,
+    }),
+    ...battery('bLA2', 'batteryLA', {
+      label: 'PORT BROADSIDE AFT B', weapon: 'railgun',
+      magPos: [0, -1.0, 5], magHalf: [2.6, 1.0, 4.0], magHp: 1.2e7,
+      rounds: 1100, cookoff: 4.2e+08,
+      hoistPos: [3.4, 0, 4], hoistHp: 2.0e6,
+      gunPos: [-2.0, 2.4, -9], gunHp: 2.0e7,
+      from: 'p.batLA', data: 'd.fireA', cool: 'l.batA', dir: [0.94, 0, 0.34], arc: 0.82,
+      draw: 24, heat: 230,
+    }),
+    ...battery('bRA2', 'batteryRA', {
+      label: 'STBD BROADSIDE AFT B', weapon: 'railgun',
+      magPos: [0, -1.0, 5], magHalf: [2.6, 1.0, 4.0], magHp: 1.2e7,
+      rounds: 1100, cookoff: 4.2e+08,
+      hoistPos: [-3.4, 0, 4], hoistHp: 2.0e6,
+      gunPos: [2.0, 2.4, -9], gunHp: 2.0e7,
+      from: 'p.batRA', data: 'd.fireA', cool: 'l.batA', dir: [-0.94, 0, 0.34], arc: 0.82,
+      draw: 24, heat: 230,
+    }),
+
     hp_('hp_tor', 'TORPEDO TUBES', 'magdeck', [0, -4.2, 12], {
       weapon: 'torpedo', mount: 'large', dir: [0, -0.04, 1], arc: 0.22,
       needs: { power: 'p.fwd', data: 'd.fireF', coolant: 'l.core' }, feed: 'mag_tor',
@@ -1140,12 +1248,12 @@ const MERIDIAN = {
       draw: 70, heat: 340, hp: 1.6e7,
     }),
     hp_('hp_beamL', 'PORT LANCE', 'spine', [9.0, 8.0, 12], {
-      weapon: 'beam', mount: 'large', dir: [0.1, 0, 1], arc: 0.20,
+      weapon: 'beam', mount: 'large', dir: [0.86, 0, 0.51], arc: 0.75,
       needs: { power: 'p.main', data: 'd.fireF', coolant: 'l.core' },
       draw: 60, heat: 640, hp: 2.0e7,
     }),
     hp_('hp_beamR', 'STBD LANCE', 'spine', [-9.0, 8.0, 12], {
-      weapon: 'beam', mount: 'large', dir: [-0.1, 0, 1], arc: 0.20,
+      weapon: 'beam', mount: 'large', dir: [-0.86, 0, 0.51], arc: 0.75,
       needs: { power: 'p.main', data: 'd.fireF', coolant: 'l.core' },
       draw: 60, heat: 640, hp: 2.0e7,
     }),
@@ -1309,9 +1417,27 @@ const BASTION = {
       half: [4.2, 2.6, 4.0], hp: 3.0e7, vuln: 1.4, sys: 'COMPUTE',
       needs: { power: 'p.ring', coolant: 'l.core' }, draw: 42, priority: 8, heat: 140,
     }),
+    // Sensors, fitted the way a designer would rather than dropped on the
+    // centreline of the bow.
+    //
+    // Every hull carried exactly ONE array, in the tip of the nose — the single
+    // compartment that eats every round of a head-on pass. Losing it blinds the
+    // ship: no lock, no radar reach, no picture in the target view. That is a
+    // capability with no redundancy sitting in the worst place on the vessel.
+    //
+    // The main array stays forward, because that is where it has to look from,
+    // but rides HIGH in the compartment rather than on the axis a shot aimed at
+    // the ship's centre actually travels down. The auxiliary sits deep amidships
+    // behind the belt, on a different power bus, and is a smaller aperture — a
+    // fallback that lets a blinded ship still fight, not a free second array.
     mod('sensor', 'sensor', 'TARGETING MAST', 'prow', [0, 4.4, 3.5], {
       half: [5.6, 3.8, 9.5], hp: 2.6e7, vuln: 1.8, sys: 'COMPUTE',
-      needs: { power: 'p.fwd', data: 'd.main' , coolant: 'l.fwd' }, draw: 44, priority: 7, heat: 60,
+      needs: { power: 'p.fwd', data: 'd.main', coolant: 'l.fwd' }, draw: 44, priority: 7, heat: 60,
+    }),
+    mod('sensor_aux', 'sensor', 'AUXILIARY MAST', 'spine', [0, 12, -10], {
+      half: [4.0, 2.4, 5.0], hp: 1.6e7, vuln: 1.6, sys: 'COMPUTE',
+      needs: { power: 'p.ring', data: 'd.main', coolant: 'l.core' },
+      draw: 24, priority: 7, heat: 32, extra: { gain: 0.55 },
     }),
     cond('c_data_main', 'data', 'src.computer', 'd.main', 'citadel', [7, -4, -4], {
       label: 'AVIONICS BUS', hp: 3.4e6, vuln: 2.6,
@@ -1504,7 +1630,7 @@ const BASTION = {
       rounds: 2000, cookoff: 1.1e9,
       hoistPos: [5, 0, 0], hoistHp: 4.0e6,
       gunPos: [-3, 3.4, 12], gunHp: 4.4e7,
-      from: 'p.port', data: 'd.fireL', cool: 'l.batF', dir: [0.24, 0, 1], arc: 0.48,
+      from: 'p.port', data: 'd.fireL', cool: 'l.batF', dir: [0.94, 0, 0.34], arc: 0.82,
       draw: 52, heat: 440,
     }),
     ...battery('bRF', 'batteryRF', {
@@ -1513,7 +1639,7 @@ const BASTION = {
       rounds: 2000, cookoff: 1.1e9,
       hoistPos: [-5, 0, 0], hoistHp: 4.0e6,
       gunPos: [3, 3.4, 12], gunHp: 4.4e7,
-      from: 'p.stbd', data: 'd.fireR', cool: 'l.batF', dir: [-0.24, 0, 1], arc: 0.48,
+      from: 'p.stbd', data: 'd.fireR', cool: 'l.batF', dir: [-0.94, 0, 0.34], arc: 0.82,
       draw: 52, heat: 440,
     }),
     ...battery('bLA', 'batteryLA', {
@@ -1522,7 +1648,7 @@ const BASTION = {
       rounds: 1200, cookoff: 8.0e8,
       hoistPos: [5, 0, 0], hoistHp: 4.0e6,
       gunPos: [-3, 3.4, 12], gunHp: 4.4e7,
-      from: 'p.port', data: 'd.fireL', cool: 'l.batA', dir: [0.24, 0, 1], arc: 0.48,
+      from: 'p.port', data: 'd.fireL', cool: 'l.batA', dir: [0.94, 0, 0.34], arc: 0.82,
       draw: 70, heat: 560,
     }),
     ...battery('bRA', 'batteryRA', {
@@ -1531,13 +1657,91 @@ const BASTION = {
       rounds: 1200, cookoff: 8.0e8,
       hoistPos: [-5, 0, 0], hoistHp: 4.0e6,
       gunPos: [3, 3.4, 12], gunHp: 4.4e7,
-      from: 'p.stbd', data: 'd.fireR', cool: 'l.batA', dir: [-0.24, 0, 1], arc: 0.48,
+      from: 'p.stbd', data: 'd.fireR', cool: 'l.batA', dir: [-0.94, 0, 0.34], arc: 0.82,
       draw: 70, heat: 560,
     }),
     mod('mag_tor', 'magazine', 'TORPEDO STOWAGE', 'magdeck', [0, 0, 0], {
       half: [12, 5, 11], hp: 5.0e7, vuln: 1.8, sys: 'ORDNANCE',
       extra: { rounds: 120, cookoff: 2.4e9 },
     }),
+    // Two more drivers in every wing. A dreadnought does not get to be the
+    // second-best broadside in the fleet: with the cruiser rebuilt to fight
+    // beam-on, a BASTION still aimed down its own nose lost three duels out of
+    // three without landing a single hull hit — a wide-arc ship it cannot
+    // out-turn simply stays outside its arcs. Same doctrine, dreadnought scale.
+    ...battery('bLF2', 'batteryLF', {
+      label: 'PORT DRIVER FWD B', weapon: 'railgun',
+      magPos: [0, -1.8, 8], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
+      rounds: 1600, cookoff: 9.0e8,
+      hoistPos: [5, 0, 4], hoistHp: 3.6e6,
+      gunPos: [-3, 3.4, 0], gunHp: 4.0e7,
+      from: 'p.port', data: 'd.fireL', cool: 'l.batF', dir: [0.94, 0, 0.34], arc: 0.82,
+      draw: 30, heat: 300,
+    }),
+    ...battery('bLF3', 'batteryLF', {
+      label: 'PORT DRIVER FWD C', weapon: 'railgun',
+      magPos: [0, -1.8, -18], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
+      rounds: 1600, cookoff: 9.0e8,
+      hoistPos: [5, 0, -10], hoistHp: 3.6e6,
+      gunPos: [-3, 3.4, -14], gunHp: 4.0e7,
+      from: 'p.port', data: 'd.fireL', cool: 'l.batF', dir: [0.94, 0, 0.34], arc: 0.82,
+      draw: 30, heat: 300,
+    }),
+    ...battery('bRF2', 'batteryRF', {
+      label: 'STBD DRIVER FWD B', weapon: 'railgun',
+      magPos: [0, -1.8, 8], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
+      rounds: 1600, cookoff: 9.0e8,
+      hoistPos: [-5, 0, 4], hoistHp: 3.6e6,
+      gunPos: [3, 3.4, 0], gunHp: 4.0e7,
+      from: 'p.stbd', data: 'd.fireR', cool: 'l.batF', dir: [-0.94, 0, 0.34], arc: 0.82,
+      draw: 30, heat: 300,
+    }),
+    ...battery('bRF3', 'batteryRF', {
+      label: 'STBD DRIVER FWD C', weapon: 'railgun',
+      magPos: [0, -1.8, -18], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
+      rounds: 1600, cookoff: 9.0e8,
+      hoistPos: [-5, 0, -10], hoistHp: 3.6e6,
+      gunPos: [3, 3.4, -14], gunHp: 4.0e7,
+      from: 'p.stbd', data: 'd.fireR', cool: 'l.batF', dir: [-0.94, 0, 0.34], arc: 0.82,
+      draw: 30, heat: 300,
+    }),
+    ...battery('bLA2', 'batteryLA', {
+      label: 'PORT DRIVER AFT B', weapon: 'railgun',
+      magPos: [0, -1.8, 8], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
+      rounds: 1600, cookoff: 9.0e8,
+      hoistPos: [5, 0, 4], hoistHp: 3.6e6,
+      gunPos: [-3, 3.4, 0], gunHp: 4.0e7,
+      from: 'p.port', data: 'd.fireL', cool: 'l.batA', dir: [0.94, 0, 0.34], arc: 0.82,
+      draw: 30, heat: 300,
+    }),
+    ...battery('bLA3', 'batteryLA', {
+      label: 'PORT DRIVER AFT C', weapon: 'railgun',
+      magPos: [0, -1.8, -18], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
+      rounds: 1600, cookoff: 9.0e8,
+      hoistPos: [5, 0, -10], hoistHp: 3.6e6,
+      gunPos: [-3, 3.4, -14], gunHp: 4.0e7,
+      from: 'p.port', data: 'd.fireL', cool: 'l.batA', dir: [0.94, 0, 0.34], arc: 0.82,
+      draw: 30, heat: 300,
+    }),
+    ...battery('bRA2', 'batteryRA', {
+      label: 'STBD DRIVER AFT B', weapon: 'railgun',
+      magPos: [0, -1.8, 8], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
+      rounds: 1600, cookoff: 9.0e8,
+      hoistPos: [-5, 0, 4], hoistHp: 3.6e6,
+      gunPos: [3, 3.4, 0], gunHp: 4.0e7,
+      from: 'p.stbd', data: 'd.fireR', cool: 'l.batA', dir: [-0.94, 0, 0.34], arc: 0.82,
+      draw: 30, heat: 300,
+    }),
+    ...battery('bRA3', 'batteryRA', {
+      label: 'STBD DRIVER AFT C', weapon: 'railgun',
+      magPos: [0, -1.8, -18], magHalf: [3.4, 1.4, 5.0], magHp: 2.4e7,
+      rounds: 1600, cookoff: 9.0e8,
+      hoistPos: [-5, 0, -10], hoistHp: 3.6e6,
+      gunPos: [3, 3.4, -14], gunHp: 4.0e7,
+      from: 'p.stbd', data: 'd.fireR', cool: 'l.batA', dir: [-0.94, 0, 0.34], arc: 0.82,
+      draw: 30, heat: 300,
+    }),
+
     hp_('hp_tor', 'TORPEDO TUBES', 'magdeck', [0, -6, 18], {
       weapon: 'torpedo', mount: 'large', dir: [0, -0.03, 1], arc: 0.22,
       needs: { power: 'p.fwd', data: 'd.main' , coolant: 'l.core' }, feed: 'mag_tor',
@@ -1715,6 +1919,75 @@ function shieldRadii(spec, com, gunScale) {
     fit = Math.max(fit, Math.sqrt(q));
   }
   return ext.map((v) => Math.round(v * fit * SHIELD_MARGIN));
+}
+
+/**
+ * The bearing this hull actually fights on, in radians off the bow.
+ *
+ * Derived from where its guns can point, by sweeping the yaw plane and finding
+ * the aspect that brings the most sustained output to bear. Zero for a
+ * nose-fighter; about 70 degrees for a hull whose main battery lives on its
+ * wings.
+ *
+ * This exists because the pilot needs it. Re-aiming the broadsides outboard
+ * made two hulls that fight beam-on, and the AI still flew every ship straight
+ * at whatever it was shooting — so a dreadnought carrying 76 MJ/s of broadside
+ * presented its bow and brought 31, and lost to a cruiser it outguns because
+ * neither of them was using the guns they had. Doctrine has to be a property of
+ * the hull the pilot can read, not an assumption baked into the pilot.
+ */
+function fightAspect(spec) {
+  const dpsOf = (w) => (w.kind === 'beam' ? w.dps : (w.energy * (w.rpm || 0)) / 60);
+  const guns = spec.modules.filter((m) => m.kind === 'hardpoint'
+    && WEAPONS[m.weapon] && !WEAPONS[m.weapon].pointDefence);
+  const borneAt = (th) => {
+    const ax = Math.sin(th);
+    const az = Math.cos(th);
+    let borne = 0;
+    for (const m of guns) {
+      const n = Math.hypot(m.dir[0], m.dir[1], m.dir[2]) || 1;
+      const dot = (m.dir[0] / n) * ax + (m.dir[2] / n) * az;
+      if (Math.acos(Math.min(1, Math.max(-1, dot))) <= m.arc + 1e-9) {
+        borne += dpsOf(w2(m));
+      }
+    }
+    return borne;
+  };
+  const w2 = (m) => WEAPONS[m.weapon];
+  const STEP = (1 * Math.PI) / 180;
+  const samples = [];
+  for (let th = 0; th <= Math.PI + 1e-9; th += STEP) {
+    samples.push({ th, v: borneAt(th) });
+  }
+  const best = samples.reduce((a, x) => Math.max(a, x.v), 0);
+  if (best <= 0) {
+    return 0;
+  }
+  // The MIDDLE of the widest band that carries the full weight, not the first
+  // bearing that reaches it.
+  //
+  // Taking the first cost the cruiser its whole broadside. Its wings cover 23
+  // to 117 degrees, so the sweep's earliest maximum is 24 — one degree inside
+  // the arc limit — and a pilot told to hold 24 sits on the stop with the
+  // guns falling out of train every time it overshoots. Measured mid-fight:
+  // one of seven drivers bearing, 115 rounds fired, the enemy on 99% hull.
+  // The centre of the band leaves forty degrees of margin either side.
+  let bestRun = { from: 0, to: 0 };
+  let runFrom = -1;
+  for (let i = 0; i < samples.length; i++) {
+    const full = samples[i].v >= best * 0.98;
+    if (full && runFrom < 0) {
+      runFrom = i;
+    }
+    if ((!full || i === samples.length - 1) && runFrom >= 0) {
+      const to = full ? i : i - 1;
+      if (to - runFrom > bestRun.to - bestRun.from) {
+        bestRun = { from: runFrom, to };
+      }
+      runFrom = -1;
+    }
+  }
+  return samples[Math.round((bestRun.from + bestRun.to) / 2)].th;
 }
 
 function boundingRadius(spec) {
@@ -1947,6 +2220,8 @@ function compile(spec) {
     inertia,
     radius,
     crewTotal: spec.crew.reduce((a, c) => a + c.size, 0),
+    /** Bearing this hull brings its weight to bear on. See `fightAspect`. */
+    fightAspect: fightAspect(spec),
     /** Longest dimension, used for the radar blip and range read-outs. */
     length: 2 * Math.max(...spec.sections.map((s) => Math.abs(s.pos[2]) + s.half[2])),
   };

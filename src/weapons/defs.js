@@ -122,9 +122,25 @@ export const WEAPONS = {
     tracer: 0xffcf7a,
     width: 0.3,
     life: 6.0,
-    role: 'EXTERNALS / ORDNANCE',
-    desc: 'Will not reach anything vital through a belt. Shreds radiators, '
-      + 'sensor masts, turret housings and incoming torpedoes.',
+    /**
+     * Lays itself, and only at ordnance.
+     *
+     * A point-defence mount is not a gun a crew trains on a ship — it is a
+     * director and a fast tracker whose entire job is killing warheads, and it
+     * has to react quicker than any trigger a person is holding. So these
+     * mounts leave the player's and the AI's fire groups altogether and engage
+     * inbound torpedoes on their own out to `pdRange`.
+     *
+     * Nothing else, deliberately. Turned on a hull a repeater is a rounding
+     * error against a belt, and every second it spends doing that is a second
+     * the ship has no defence against the one weapon that opens three
+     * compartments at once.
+     */
+    pointDefence: true,
+    pdRange: 2600,
+    role: 'AUTONOMOUS / ANTI-ORDNANCE',
+    desc: 'Lays itself. Tracks and shreds incoming torpedoes inside three '
+      + 'kilometres without being asked, and will not fire at anything else.',
   },
   railgun: {
     id: 'railgun',
