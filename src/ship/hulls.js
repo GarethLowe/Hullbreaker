@@ -1169,18 +1169,18 @@ const MERIDIAN = {
       draw: 24, heat: 230,
     }),
     ...battery('bLA', 'batteryLA', {
-      label: 'PORT BROADSIDE AFT', weapon: 'plasma',
+      label: 'PORT BROADSIDE AFT', weapon: 'autocannon',
       magPos: [0, -1.5, -5], magHalf: [3.2, 1.4, 5.0], magHp: 1.4e7,
-      rounds: 600, cookoff: 3.0e8,
+      rounds: 2600, cookoff: 3.0e8,
       hoistPos: [3.4, 0, 0], hoistHp: 2.2e6,
       gunPos: [-2.0, 2.4, 8], gunHp: 2.0e7,
       from: 'p.batLA', data: 'd.fireA', cool: 'l.batA', dir: [0.94, 0, 0.34], arc: 0.82,
       draw: 34, heat: 300,
     }),
     ...battery('bRA', 'batteryRA', {
-      label: 'STBD BROADSIDE AFT', weapon: 'plasma',
+      label: 'STBD BROADSIDE AFT', weapon: 'autocannon',
       magPos: [0, -1.5, -5], magHalf: [3.2, 1.4, 5.0], magHp: 1.4e7,
-      rounds: 600, cookoff: 3.0e8,
+      rounds: 2600, cookoff: 3.0e8,
       hoistPos: [-3.4, 0, 0], hoistHp: 2.2e6,
       gunPos: [2.0, 2.4, 8], gunHp: 2.0e7,
       from: 'p.batRA', data: 'd.fireA', cool: 'l.batA', dir: [-0.94, 0, 0.34], arc: 0.82,
@@ -1643,7 +1643,7 @@ const BASTION = {
       draw: 52, heat: 440,
     }),
     ...battery('bLA', 'batteryLA', {
-      label: 'PORT BROADSIDE AFT', weapon: 'plasma',
+      label: 'PORT BROADSIDE AFT', weapon: 'autocannon',
       magPos: [0, -2.2, -8], magHalf: [4.6, 1.9, 8], magHp: 3.0e7,
       rounds: 1200, cookoff: 8.0e8,
       hoistPos: [5, 0, 0], hoistHp: 4.0e6,
@@ -1652,7 +1652,7 @@ const BASTION = {
       draw: 70, heat: 560,
     }),
     ...battery('bRA', 'batteryRA', {
-      label: 'STBD BROADSIDE AFT', weapon: 'plasma',
+      label: 'STBD BROADSIDE AFT', weapon: 'autocannon',
       magPos: [0, -2.2, -8], magHalf: [4.6, 1.9, 8], magHp: 3.0e7,
       rounds: 1200, cookoff: 8.0e8,
       hoistPos: [-5, 0, 0], hoistHp: 4.0e6,
@@ -1812,7 +1812,11 @@ function hardwareVolumes(spec, gunScale) {
     const s = byIdOf(spec, m.section);
     const frame = mountFrame(m.pos, s.half, m.dir, s.style);
     const scale = (MOUNTS[m.mount] || 1) * gunScale;
-    const barrel = Math.max(...(MUZZLES[m.weapon] || [[0, 0, 2]])
+    // By ART, not by weapon id: a gun borrowing another fitting's model has
+    // that model's barrels, and looking up the wrong key silently falls back to
+    // a two-metre stub — which would leave real barrels sticking out of the
+    // ship's own shield.
+    const barrel = Math.max(...(MUZZLES[w.art || m.weapon] || [[0, 0, 2]])
       .map((q) => Math.hypot(q[0], q[1], q[2])));
     const reach = (PIVOTS[mountStyle(w, m.arc)] + barrel) * scale;
     const len = Math.hypot(m.dir[0], m.dir[1], m.dir[2]) || 1;

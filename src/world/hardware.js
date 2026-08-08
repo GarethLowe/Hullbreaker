@@ -211,8 +211,12 @@ export function buildMount(assets, tint, weapon, style, scale) {
   yaw.add(pitch);
   const gun = new THREE.Group();
   pitch.add(gun);
-  attach(gun, `gun_${weapon.id}`);
-  const glow = attach(gun, `gun_${weapon.id}_glow`);
+  // A weapon may borrow another fitting's geometry. The kit is generated from
+  // Blender by tools/kit_build.py, so a new weapon that has no model of its own
+  // yet says which one it is wearing rather than rendering as nothing at all.
+  const art = weapon.art || weapon.id;
+  attach(gun, `gun_${art}`);
+  const glow = attach(gun, `gun_${art}_glow`);
   root.scale.setScalar(scale);
 
   return {
@@ -224,6 +228,6 @@ export function buildMount(assets, tint, weapon, style, scale) {
     /** Fixed installations have no moving parts; do not waste the trig. */
     slews: style !== 'fixed',
     pivot: PIVOTS[style],
-    muzzles: MUZZLES[weapon.id] || [[0, 0, 2]],
+    muzzles: MUZZLES[art] || [[0, 0, 2]],
   };
 }

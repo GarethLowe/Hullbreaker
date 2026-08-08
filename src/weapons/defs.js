@@ -53,31 +53,6 @@ export const WEAPONS = {
     desc: 'Melts a facet faster than anything else and pours heat into whatever '
       + 'compartment it opens. Cooks its own mount if you hold the trigger.',
   },
-  pulse: {
-    id: 'pulse',
-    name: 'PULSE BATTERY',
-    cls: 'ENERGY / REPEATER',
-    kind: 'projectile',
-    rpm: 110,
-    mass: 0,                 // massless bolt; energy is authored directly
-    energy: 6.0e6,
-    muzzleVel: 2200,
-    drag: 0,
-    ap: 0.75,
-    // A coherent pulse has real length; the field has all of it to work with.
-    dwell: 0.020,
-    dump: 0,
-    heat: 55,
-    draw: 1.6,               // MJ per shot from the capacitor
-    ammo: 0,
-    spread: 0.0016,
-    tracer: 0x76e0ff,
-    width: 0.4,
-    life: 4.5,
-    role: 'SUSTAINED / ANTI-SHIELD',
-    desc: 'Cheap, fast, and nearly useless against a belt. Burns a facet down '
-      + 'so something heavier can get through the hole.',
-  },
   ion: {
     id: 'ion',
     name: 'ION PROJECTOR',
@@ -166,33 +141,43 @@ export const WEAPONS = {
       + 'engineering, taking a line of compartments with it and leaving every '
       + 'one of them open to space.',
   },
-  plasma: {
-    id: 'plasma',
-    name: 'PLASMA ACCELERATOR',
-    cls: 'THERMAL / SLUG',
+  autocannon: {
+    id: 'autocannon',
+    name: 'REPEATING DRIVER',
+    cls: 'KINETIC / RAPID FIRE',
     kind: 'projectile',
-    rpm: 26,
-    mass: 40,
-    muzzleVel: 1000,
-    drag: 4.0e-5,
-    ap: 1.35,                // a blob of plasma is a poor penetrator
-    // A diffuse bolt washes over the field rather than punching through it.
-    dwell: 0.006,
-    // Comes apart in the first thing it reaches and dumps most of its budget
-    // there rather than carrying on: one compartment, gutted.
-    dump: 0.60,
-    splash: { radius: 60, energy: 9.0e6 },
-    heat: 460,
-    draw: 26,
-    ammo: 0,
+    /**
+     * Borrows the three-barrel pulse model. Nothing else in the kit reads as a
+     * rapid-fire mount, and a bespoke one needs a Blender rebuild through
+     * tools/kit_build.py rather than a hand edit of the generated kit.
+     */
+    art: 'pulse',
+    rpm: 240,
+    mass: 2.6,
+    muzzleVel: 2100,
+    drag: 8.0e-6,
+    /**
+     * A poor penetrator on purpose. At 1.7 a round costs more to cross an
+     * intact heavy belt than it carries, so this gun cannot reach anything
+     * vital through armour — it strips the plate first and only gets inside
+     * once the plate is spent, because `wallCost` falls with the plating's
+     * condition. That is the whole shape of the weapon: it does not defeat
+     * armour, it wears it away.
+     */
+    ap: 1.7,
+    dump: 0,
+    heat: 30,
+    draw: 1.5,
+    ammo: 1,
     spread: 0.005,
-    tracer: 0x7dffc4,
-    width: 1.4,
-    life: 8.5,
-    special: 'plasma',
-    role: 'COMPARTMENT KILL',
-    desc: 'Slow enough to lead badly and slow enough to see coming. Whatever '
-      + 'it does reach it guts, and it sets the compartment on fire.',
+    tracer: 0xffb347,
+    width: 0.32,
+    life: 5.0,
+    role: 'SHIELD BREAKER / VOLUME',
+    desc: 'Twenty-three megajoules a second of small, fast slugs. It will not '
+      + 'get through a belt and it does not need to: nothing in the fleet '
+      + 'saturates a shield emitter faster, and it strips plate, radiators and '
+      + 'sensor masts off whatever is left standing behind one.',
   },
 
   // --- ordnance ------------------------------------------------------------

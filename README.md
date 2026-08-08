@@ -388,6 +388,35 @@ half the panels off still takes it to 1.4 s and 4.8 s.
 | MERIDIAN | 94 °C, 78% of rating | 85 °C, 91% |
 | BASTION | 110 °C, 80% of rating | 79 °C, 99% |
 
+#### The repeating driver
+
+The PLASMA ACCELERATOR was worst in class on every axis that mattered — 8.7 MJ/s
+against the mass driver's 13.5, less shield load than anything but a lance, and
+14 MJ through a wall where the driver put 38. Its `special: 'plasma'` flag was
+dead config nothing read. It has been replaced rather than tuned.
+
+| weapon | MJ/shot | rpm | MJ/s | shield load/s | facets/min | through a heavy belt |
+|-|-|-|-|-|-|-|
+| MASS DRIVER | 40.6 | 20 | 13.5 | 41 | 7.0 | **38.1 MJ** |
+| REPEATING DRIVER | 5.7 | 240 | **22.9** | **50** | **8.7** | **−1.9 MJ** |
+| ION PROJECTOR | 60.0 | 12 | 12.0 | 36 | 6.2 | 60.0 MJ |
+| BEAM LANCE | 0.2 | — | 12.0 | 14 | 2.5 | — |
+
+The most sustained output in the fleet and the fastest shield-breaker in it,
+and it cannot get through an intact heavy belt at all — a round costs more to
+cross one than it carries. It strips the plate first and only reaches anything
+vital once the plating is spent, because `wallCost` falls with the plate's
+condition. It does not defeat armour, it wears it away.
+
+It wears the three-barrel pulse model, which nothing was using. Weapons may name
+an `art` fitting to borrow — the kit is generated from Blender by
+`tools/kit_build.py`, so a new gun borrows a model until someone builds it one.
+Geometry and muzzle points are looked up through the same key, since taking
+barrels from one model and firing points from another puts the shot beside the
+barrel; `selfcheck` asserts that pairing, and the shield derivation reads muzzle
+reach through it too — by weapon id it silently fell back to a two-metre stub
+and would have left real barrels outside the ship's own field.
+
 #### A field stops things; what it costs is dissipation
 
 The shield model decided how much of a hit leaked through from the round's

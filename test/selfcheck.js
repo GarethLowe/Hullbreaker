@@ -1182,8 +1182,15 @@ for (const [id, h] of Object.entries(HULLS)) {
     ok(`hulls only use styles the kit models ("${s}")`, SHELL_STYLES.includes(s));
   }
   for (const w of Object.values(WEAPONS)) {
-    ok(`${w.id} has a modelled gun`, !!PARTS[`gun_${w.id}`]);
-    ok(`${w.id} has muzzle points`, Array.isArray(MUZZLES[w.id]) && MUZZLES[w.id].length > 0);
+    // A weapon may wear another fitting's model — the kit is generated from
+    // Blender, so a new gun borrows until someone rebuilds it one of its own.
+    // What must hold is that whatever it wears exists, and that the geometry
+    // and the muzzle points come from the SAME fitting: taking barrels from one
+    // model and firing points from another puts the shot beside the barrel.
+    const art = w.art || w.id;
+    ok(`${w.id} has a modelled gun`, !!PARTS[`gun_${art}`], `wants gun_${art}`);
+    ok(`${w.id} has muzzle points`, Array.isArray(MUZZLES[art]) && MUZZLES[art].length > 0,
+      `wants MUZZLES.${art}`);
   }
   for (const style of ['turret', 'gimbal', 'fixed']) {
     ok(`mount style "${style}" has a base`, !!PARTS[`base_${style}`]);
@@ -1500,7 +1507,8 @@ for (const [id, h] of Object.entries(HULLS)) {
         const f = mountFrame(def.pos, s.half, def.dir, s.style);
         const scale = (MOUNTS[def.mount] || 1) * hull.gunScale;
         const reach = (PIVOTS[mountStyle(WEAPONS[def.weapon], def.arc)]
-          + Math.max(...MUZZLES[def.weapon].map((m) => Math.hypot(m[0], m[1], m[2])))) * scale;
+          + Math.max(...MUZZLES[WEAPONS[def.weapon].art || def.weapon]
+            .map((m) => Math.hypot(m[0], m[1], m[2])))) * scale;
         const seat = new Vector3(
           s.pos[0] + def.pos[0], s.pos[1] + def.pos[1], s.pos[2] + def.pos[2],
         ).addScaledVector(f.up, f.lift).sub(new Vector3(...hull.com));
