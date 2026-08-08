@@ -907,8 +907,14 @@ export class Crew {
       const byTask = new Map();
       for (const q of live) {
         byWhere.set(q.at, (byWhere.get(q.at) || 0) + q.size);
-        const k = q.heading ? 'moving' : (q.task ? q.task.kind : 'station');
-        byTask.set(k, (byTask.get(k) || 0) + q.size);
+        // Only the parties that are actually doing something get a vote on what
+        // the division is doing. Counting the ones standing at their post too
+        // produced "STATION 6/12" — a division reported as holding station and
+        // as having six parties out, in the same breath.
+        if (q.task || q.heading) {
+          const k = q.heading ? 'moving' : q.task.kind;
+          byTask.set(k, (byTask.get(k) || 0) + q.size);
+        }
       }
       const top = (m, fallback) => [...m.entries()]
         .sort((a, b) => b[1] - a[1])[0]?.[0] ?? fallback;

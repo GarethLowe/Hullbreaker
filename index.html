@@ -344,7 +344,10 @@
   #hudPipAspect { color: var(--accent); font-weight: 700; }
   #hudPipState.bad { color: var(--dead); font-weight: 700; }
 
-  .dc-tree { overflow-y: auto; padding: 4px 0; flex: 1 1 auto; min-height: 90px; }
+  /* The tree and the crew list share what the panel can spare, rather than one
+     taking a fixed slice and starving the other. Both scroll; neither is cut
+     down to a couple of rows when the other has a lot to say. */
+  .dc-tree { overflow-y: auto; padding: 4px 0; flex: 1 1 40%; min-height: 96px; }
   .dc-tree::-webkit-scrollbar { width: 5px; }
   .dc-tree::-webkit-scrollbar-thumb { background: var(--line); }
   .diag-group {
@@ -389,14 +392,21 @@
   .diag-row.ok .diag-name, .diag-row.warn .diag-name,
   .diag-row.crit .diag-name, .diag-row.dead .diag-name { color: var(--ink); }
 
+  /* Sized for eight roster lines, back when that was all it held. With a job
+     breakdown under each division it now runs to thirty-odd, so it takes what
+     the panel can spare and scrolls past that — with a visible thumb, because a
+     list that silently cuts off mid-row just looks broken. */
   .dc-crew {
     border-top: 1px solid var(--line);
     padding: 4px 10px 6px;
     font-size: 9px;
-    flex: 0 0 auto;
-    max-height: 130px;
+    flex: 1 1 60%;
+    min-height: 110px;
     overflow-y: auto;
+    overscroll-behavior: contain;
   }
+  .dc-crew::-webkit-scrollbar { width: 5px; }
+  .dc-crew::-webkit-scrollbar-thumb { background: var(--line); }
   .crew-row {
     display: grid;
     grid-template-columns: 1fr auto auto auto;
