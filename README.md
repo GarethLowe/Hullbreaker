@@ -304,6 +304,63 @@ overshoot: measured mid-fight, one of seven drivers bearing, 115 rounds away, th
 enemy on 99% hull. It returns the centre of the band now, and the ships fight
 where their guns are.
 
+#### The dreadnought carried enough; it could only use it through six degrees
+
+Those eight extra drivers did not survive. At 4.7 deg/s of yaw the BASTION never
+reached the 71 degree aspect its own guns then wanted, held 34, and brought two
+of fifteen guns to bear — so they were pulled and the four wing turrets were
+given 76 degree arcs instead. That fixed the doctrine and left the real problem
+standing: the wings *rest* at 70 degrees, so their two cones overlap across five
+degrees of bow. The hull carried 104 MJ/s against the cruiser's 75 and could use
+all of it through a **six degree window**. Twenty degrees off the nose it was on
+36 MJ/s, two guns of seven, and it stayed there all the way aft.
+
+Four rapid-fire mounts now sit on the dorsal shoulder resting at 38 degrees with
+the same 76 degree arc, so port and starboard overlap across seventy-five degrees
+instead of five. Every one of them bears dead ahead, so `fightAspect` stays at
+3 degrees and the pilot's doctrine does not move — which is precisely what
+separates this from the reverted experiment. The same four guns on the wing
+bearing give an identical peak and a third less weight everywhere the hull is
+actually pointed.
+
+Measured against a paired control at identical seeds, 240 duels a side:
+
+| | before | after |
+|-|-|-|
+| W‑L‑D | 180‑8‑52 | 223‑3‑14 |
+| stalemates | 21.7% | 5.8% |
+| median time to kill | 115 s | 66 s |
+| throw weight on target | 100.5 | 181.8 MJ/s |
+
+**The story that came with it was wrong, and that is the more useful half.** The
+obvious reading of a six degree window on a hull that needs twenty seconds to
+swing a quarter turn is that a good pilot parks on the shoulder and farms it. It
+does not survive measurement. Flown deliberately for the beam, at full thrust,
+starting already established on station, a MERIDIAN holds a mean bearing of
+**8.1 degrees** and never once reached 70 in forty attempts: at four kilometres
+its 92 m/s buys 1.35 deg/s of bearing against 4.70 deg/s of yaw. The shoulder is
+not purchasable, and the geometry that would make it purchasable is inside a
+kilometre and a half, where the dreadnought's own range-hold will not go. The
+battery earns its place on plain weight of fire at the bow, where the fight
+actually happens — it wins what it was already winning, faster, and its share of
+*decided* fights barely moves.
+
+Two drafts of the fitting were wrong before this one, both caught by
+instrumentation rather than by reading:
+
+- At 52 MW a mount the four of them drew 152.7 MW sustained, and since
+  `_tickPower` sheds in ascending priority — shield capacitors at 3, generator
+  at 4, guns at 6 — the ship began **shedding its own shield to feed its guns**
+  above half throttle. It escaped only by running out of ammunition first, which
+  is not a margin. At 34 MW nothing sheds in 1.4 million frames.
+- Moving the forward pair onto `l.fwd` read better on paper and measured worse.
+  `l_batF` is a run *from* `l.fwd`, so it put six of the nine guns behind one
+  parent and total gun-offline time went up. Those trips were never steady-state
+  heat — every loop sits in the low twenties all fight — they are severed runs
+  and dead pumps in the one duel in eight where the ship is badly hit. The answer
+  to battle damage is two parents and a cross-tie, which the hull already had.
+  Cut any single coolant run now and no gun goes offline at all.
+
 #### Point defence lays itself
 
 A repeater is a director and a fast tracker whose entire job is killing

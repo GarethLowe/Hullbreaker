@@ -1651,10 +1651,16 @@ const BASTION = {
       from: 'p.stbd', data: 'd.fireR', cool: 'l.batF', dir: [-0.94, 0, 0.34], arc: 1.32,
       draw: 52, heat: 440,
     }),
+    // 2000 rounds, not 1200. At 240 rpm a full box is 500 seconds of held
+    // trigger against the cruiser's 650, and the autocannon is the gun that
+    // decides a long fight: it is what holds an enemy facet saturated so the
+    // railguns can work. Eighty duels put both aft magazines at zero in 15 of
+    // the 18 fights that ran past 250 seconds, and refilling them converted
+    // three of four stalemates into decisions.
     ...battery('bLA', 'batteryLA', {
       label: 'PORT BROADSIDE AFT', weapon: 'autocannon',
       magPos: [0, -2.2, -8], magHalf: [4.6, 1.9, 8], magHp: 3.0e7,
-      rounds: 1200, cookoff: 8.0e8,
+      rounds: 2000, cookoff: 1.1e9,
       hoistPos: [5, 0, 0], hoistHp: 4.0e6,
       gunPos: [-3, 3.4, 12], gunHp: 4.4e7,
       from: 'p.port', data: 'd.fireL', cool: 'l.batA', dir: [0.94, 0, 0.34], arc: 1.32,
@@ -1663,11 +1669,128 @@ const BASTION = {
     ...battery('bRA', 'batteryRA', {
       label: 'STBD BROADSIDE AFT', weapon: 'autocannon',
       magPos: [0, -2.2, -8], magHalf: [4.6, 1.9, 8], magHp: 3.0e7,
-      rounds: 1200, cookoff: 8.0e8,
+      rounds: 2000, cookoff: 1.1e9,
       hoistPos: [-5, 0, 0], hoistHp: 4.0e6,
       gunPos: [3, 3.4, 12], gunHp: 4.4e7,
       from: 'p.stbd', data: 'd.fireR', cool: 'l.batA', dir: [-0.94, 0, 0.34], arc: 1.32,
       draw: 70, heat: 560,
+    }),
+
+    // --- shelter-deck secondary battery ------------------------------------
+    //
+    // Four rapid-fire mounts on the shoulder. They were fitted to fix a
+    // coverage problem and they are kept for a different reason, so both are
+    // written down here.
+    //
+    // The coverage problem is real and measurable. The dreadnought carried
+    // 104 MJ/s against the cruiser's 75 and could use all of it only through a
+    // six degree window: the wing turrets rest at 70 degrees with a 76 degree
+    // arc, so their two cones overlap across five degrees of bow. Twenty
+    // degrees off the nose it fell to 36 MJ/s — two guns of seven — and stayed
+    // there all the way aft, on a hull that yaws at 4.7 deg/s and needs twenty
+    // seconds to swing a quarter turn.
+    //
+    // What was NOT true is the story that went with it. The obvious inference
+    // is that a good pilot parks on that shoulder and farms the thing, and it
+    // does not survive measurement: flown deliberately for the beam, at full
+    // thrust, starting already established on station, a MERIDIAN holds a mean
+    // bearing of 8.1 degrees and never once reaches 70 in forty attempts. At
+    // four kilometres its 92 m/s buys 1.35 deg/s of bearing against 4.70 deg/s
+    // of yaw. The shoulder is not purchasable, and the geometry that would make
+    // it purchasable is inside a kilometre and a half, where the dreadnought's
+    // own range-hold will not go. The pre-change hull was not being farmed that
+    // way either.
+    //
+    // So the battery earns its place on plain weight of fire at the bearing the
+    // fight actually happens at, which is the bow. Measured against a paired
+    // control at identical seeds: throw weight on target 100 -> 183 MJ/s,
+    // damage into the cruiser +84%, median time to kill 132 -> 56 s, and the
+    // stalemate rate — a fifth of all duels — down to eight per cent. It wins
+    // the fights it was already winning, faster; its share of decided fights
+    // barely moves.
+    //
+    // The rest bearing is still the thing that matters. At 38 degrees with the
+    // same 76 degree arc, port and starboard overlap across seventy-five
+    // degrees instead of five, so every gun here bears dead ahead and
+    // `fightAspect` stays on the bow — the doctrine the pilot reads does not
+    // move. That is the opposite of the eight drivers fitted and reverted
+    // above, which went on the wing bearing, whose cone excludes the bow, and
+    // dragged the aspect the hull wanted out to 71 degrees. The same four guns
+    // on that bearing would give an identical peak and a third less weight
+    // everywhere the hull is actually pointed.
+    //
+    // Split fore and aft across the two best-armoured compartments on the ship,
+    // on separate buses, separate loops and three different fire-control nodes,
+    // because a secondary battery that dies to one round is a decoration.
+    //
+    // 34 MW and 340 heat, not the wing mounts' 70 and 560: a secondary carries
+    // lighter training gear and local control, and the number is load-bearing.
+    // A first draft at 52 drew 152.7 MW sustained between the four of them, and
+    // because `_tickPower` sheds in ascending priority — shield capacitors at 3
+    // and the generator at 4, ahead of guns at 6 — a BASTION holding its trigger
+    // above half throttle began shedding its own SHIELD to feed them, onset
+    // 705 s at half throttle and 350 s at full burn. It escaped only by running
+    // out of ammunition first, which is not a margin. At 34 they draw 99.9 MW
+    // sustained against a hard ceiling of 136 (drawNow is draw x (0.15 + 0.85
+    // duty) and duty is clamped, so four mounts cannot exceed 4 x 34 however
+    // they are flown), the reactor's derate halves from 6.8 C to 4.5, and
+    // nothing sheds: zero shed frames for all three shield modules across
+    // 1.4 million duel frames and a throttle sweep with the trigger held and
+    // the magazines refilled every tick.
+    //
+    // Cooling deliberately straddles BOTH battery loops rather than sitting on
+    // one, and that is a survivability choice rather than a thermal one. A draft
+    // that moved the forward pair onto l.fwd read better on paper and measured
+    // worse: `l_batF` is a run FROM l.fwd, so it put six of the nine guns behind
+    // one parent alongside the fire director, targeting mast, prow amplifier,
+    // bow turret and ion projector, and total gun-offline time went UP, 33.1 to
+    // 38.6 points. These trips are not steady-state heat — every loop sits in
+    // the low twenties C all fight — they are severed runs and dead pumps, and
+    // they land in the one duel in eight where the ship is badly hit. The answer
+    // to battle damage is two parents and a cross-tie, not a tidier heat table.
+    // Cut any single coolant run and NO gun goes offline: the worst of them,
+    // l_fwd, leaves five of nine circulating at half flow. Only with `l_tie_bat`
+    // destroyed as well does a second cut take four guns, and four is the
+    // ceiling.
+    ...battery('sLF', 'fwdbattery', {
+      label: 'PORT SHELTER DECK', weapon: 'autocannon', mount: 'medium',
+      magPos: [13, -8, 0], magHalf: [4, 3, 8], magHp: 3.0e7,
+      rounds: 1600, cookoff: 9.0e8,
+      hoistPos: [10, 3, -6], hoistHp: 4.0e6,
+      gunPos: [12, 15, -12], gunHp: 4.4e7,
+      from: 'p.fwd', data: 'd.main', cool: 'l.batF',
+      dir: [0.612, 0.105, 0.784], arc: 1.32,
+      draw: 34, heat: 340,
+    }),
+    ...battery('sRF', 'fwdbattery', {
+      label: 'STBD SHELTER DECK', weapon: 'autocannon', mount: 'medium',
+      magPos: [-13, -8, 0], magHalf: [4, 3, 8], magHp: 3.0e7,
+      rounds: 1600, cookoff: 9.0e8,
+      hoistPos: [-10, 3, -6], hoistHp: 4.0e6,
+      gunPos: [-12, 15, -12], gunHp: 4.4e7,
+      from: 'p.fwd', data: 'd.main', cool: 'l.batF',
+      dir: [-0.612, 0.105, 0.784], arc: 1.32,
+      draw: 34, heat: 340,
+    }),
+    ...battery('sLA', 'spine', {
+      label: 'PORT SPINE DECK', weapon: 'autocannon', mount: 'medium',
+      magPos: [14, 11, 12], magHalf: [4, 3, 8], magHp: 3.0e7,
+      rounds: 1600, cookoff: 9.0e8,
+      hoistPos: [12, 14, 4], hoistHp: 4.0e6,
+      gunPos: [16, 17, 12], gunHp: 4.4e7,
+      from: 'p.ring', data: 'd.fireL', cool: 'l.batA',
+      dir: [0.612, 0.105, 0.784], arc: 1.32,
+      draw: 34, heat: 340,
+    }),
+    ...battery('sRA', 'spine', {
+      label: 'STBD SPINE DECK', weapon: 'autocannon', mount: 'medium',
+      magPos: [-14, 11, 12], magHalf: [4, 3, 8], magHp: 3.0e7,
+      rounds: 1600, cookoff: 9.0e8,
+      hoistPos: [-12, 14, 4], hoistHp: 4.0e6,
+      gunPos: [-16, 17, 12], gunHp: 4.4e7,
+      from: 'p.ring', data: 'd.fireR', cool: 'l.batA',
+      dir: [-0.612, 0.105, 0.784], arc: 1.32,
+      draw: 34, heat: 340,
     }),
     mod('mag_tor', 'magazine', 'TORPEDO STOWAGE', 'magdeck', [0, 0, 0], {
       half: [12, 5, 11], hp: 5.0e7, vuln: 1.8, sys: 'ORDNANCE',
@@ -1703,10 +1826,21 @@ const BASTION = {
       needs: { power: 'p.ring', data: 'd.main', coolant: 'l.core' }, feed: 'mag_fwd',
       draw: 8, heat: 80, hp: 1.6e7,
     }),
+    // A ready-use locker of its own, rather than sharing the port aft gun's
+    // magazine. A repeater cycles at 400 rpm and the autocannon it was sharing
+    // with at 240, so between them they emptied that box in 112 seconds while
+    // the starboard gun was still firing at 300 — the port battery went quiet
+    // three minutes early for no reason a gunner would recognise. Point
+    // defence keeps its own ammunition next to the mount on a real ship for
+    // exactly this reason: it fires in bursts nobody schedules.
+    mod('mag_pd', 'magazine', 'PD READY LOCKER', 'engineering', [0, 13, 16], {
+      half: [4, 2.4, 5], hp: 2.0e7, vuln: 1.6, sys: 'ORDNANCE',
+      extra: { rounds: 3000, cookoff: 2.4e8 },
+    }),
     // Up and forward, for the reason given on the MERIDIAN's.
     hp_('hp_pdC', 'POINT DEFENCE C', 'engineering', [0, 16, 22], {
       weapon: 'repeater', mount: 'small', dir: [0, 0.6, 0.6], arc: 1.3,
-      needs: { power: 'p.ring', data: 'd.main', coolant: 'l.aft' }, feed: 'mag_bLA',
+      needs: { power: 'p.ring', data: 'd.main', coolant: 'l.aft' }, feed: 'mag_pd',
       draw: 8, heat: 80, hp: 1.6e7,
     }),
   ],
