@@ -197,6 +197,15 @@ const hp_ = (id, label, section, pos, o = {}) => mod(
  * That is the trade the `cap` model exists to express — cross-connecting costs
  * capability instead of being free, and a ship fights on after a hit that used
  * to switch a system off outright.
+ *
+ * A tie must live in a DIFFERENT COMPARTMENT from the run it backs up. Damage
+ * here arrives as a compartment being opened and everything inside it wrecked,
+ * so a spare cable laid alongside the one it replaces is not redundancy — it is
+ * a second thing to lose to the same round. Every tie was originally authored
+ * next to its primary, which meant the picket and the frigate both went
+ * completely dark when engineering was hit, with both power trunks in the
+ * compartment that took the round. `selfcheck` walks every hull losing one
+ * whole compartment at a time and will not let that back in.
  */
 const tie = (id, net, from, to, section, pos, o = {}) => cond(
   id, net, from, to, section, pos,
@@ -385,7 +394,7 @@ const SABRE = {
 
     // Casualty routing. A picket carries one of everything, so the ties are
     // what stop one of everything being one round.
-    tie('c_tie_keel', 'power', 'src.reactor', 'p.main', 'engineering', [0, -3.4, 6], {
+    tie('c_tie_keel', 'power', 'src.reactor', 'p.main', 'drivebay', [0, 3.0, 4], {
       label: 'KEEL TRUNK', cap: 0.6,
     }),
     tie('c_tie_fwd', 'power', 'p.main', 'p.fwd', 'fwdhold', [0, -2.6, -4], {
@@ -394,10 +403,10 @@ const SABRE = {
     tie('c_tie_pod', 'power', 'p.podR', 'p.podL', 'spine', [3.0, -4.0, -3], {
       label: 'POD CROSS-TIE', cap: 0.5,
     }),
-    tie('c_tie_fire', 'data', 'd.eng', 'd.fire', 'engineering', [4.0, 3.6, 4], {
+    tie('c_tie_fire', 'data', 'd.eng', 'd.fire', 'fwdhold', [4.0, 2.6, 4], {
       label: 'DIRECTOR CROSS-TIE', cap: 0.5,
     }),
-    tie('l_tie_aft', 'coolant', 'src.pump', 'l.aft', 'engineering', [4.0, -3.2, 5], {
+    tie('l_tie_aft', 'coolant', 'src.pump', 'l.aft', 'spine', [4.0, -3.2, 5], {
       label: 'AUXILIARY DISCHARGE', cap: 0.6, leak: 0.1,
     }),
     tie('l_tie_pod', 'coolant', 'l.aft', 'l.pod', 'podL', [-2.0, 0, -3], {
@@ -629,16 +638,16 @@ const HALBERD = {
     }),
 
     // Casualty routing.
-    tie('c_tie_keel', 'power', 'src.reactor', 'p.main', 'engineering', [0, -5.5, 8], {
+    tie('c_tie_keel', 'power', 'src.reactor', 'p.main', 'drivebay', [0, 4.5, 4], {
       label: 'KEEL TRUNK', cap: 0.6,
     }),
-    tie('c_tie_bridge', 'power', 'p.main', 'p.bridge', 'bridge', [3.4, -3.4, -6], {
+    tie('c_tie_bridge', 'power', 'p.main', 'p.bridge', 'fwdhold', [4.0, 2.6, -6], {
       label: 'BRIDGE ALTERNATE', cap: 0.45,
     }),
     tie('c_tie_spon', 'power', 'p.sponR', 'p.sponL', 'spine', [0, -6.0, 3], {
       label: 'SPONSON CROSS-TIE', cap: 0.5,
     }),
-    tie('c_tie_fire', 'data', 'd.eng', 'd.fire', 'coredeck', [5.5, 6.0, 5], {
+    tie('c_tie_fire', 'data', 'd.eng', 'd.fire', 'fwdhold', [-4.0, 2.6, 4], {
       label: 'DIRECTOR CROSS-TIE', cap: 0.5,
     }),
     tie('l_tie_aft', 'coolant', 'src.pump', 'l.aft', 'engineering', [-6.0, -4.0, 5], {
@@ -647,7 +656,7 @@ const HALBERD = {
     tie('l_tie_fwd', 'coolant', 'l.core', 'l.fwd', 'fwdhold', [-6.0, -3.0, -6], {
       label: 'FORWARD CROSS-CONNECT', cap: 0.5, leak: 0.1,
     }),
-    tie('l_tie_spon', 'coolant', 'l.fwd', 'l.spon', 'coredeck', [6.0, -7.0, -6], {
+    tie('l_tie_spon', 'coolant', 'l.fwd', 'l.spon', 'sponsonL', [0, 0, -6], {
       label: 'SPONSON CROSS-CONNECT', cap: 0.5, leak: 0.1,
     }),
 
@@ -987,7 +996,7 @@ const MERIDIAN = {
 
     // Casualty routing. A cruiser's whole argument is that nothing vital exists
     // only once; before these, seventeen of its nodes did.
-    tie('c_tie_bridge', 'power', 'p.main', 'p.bridge', 'bridge', [4.0, -4.0, -8], {
+    tie('c_tie_bridge', 'power', 'p.main', 'p.bridge', 'forehold', [6.0, 4.0, -8], {
       label: 'BRIDGE ALTERNATE', cap: 0.45,
     }),
     tie('c_tie_batF', 'power', 'p.batRF', 'p.batLF', 'spine', [0, 6.0, -2], {
@@ -996,10 +1005,10 @@ const MERIDIAN = {
     tie('c_tie_batA', 'power', 'p.batRA', 'p.batLA', 'coredeck', [0, 0, 2], {
       label: 'AFT BATTERY CROSS-TIE', cap: 0.5,
     }),
-    tie('c_tie_fire', 'data', 'd.fireA', 'd.fireF', 'spine', [-7.0, 9.5, -10], {
+    tie('c_tie_fire', 'data', 'd.fireA', 'd.fireF', 'forehold', [-6.0, 4.0, -8], {
       label: 'DIRECTOR CROSS-TIE', cap: 0.6,
     }),
-    tie('c_tie_eng', 'data', 'd.fireA', 'd.eng', 'engineering', [8.0, 8.0, -12], {
+    tie('c_tie_eng', 'data', 'd.fireA', 'd.eng', 'magdeck', [8.0, 2.4, -6], {
       label: 'DC ALTERNATE', cap: 0.5,
     }),
     tie('l_tie_core', 'coolant', 'l.core', 'l.aft', 'engineering', [4.0, -8.0, -12], {
@@ -1008,7 +1017,7 @@ const MERIDIAN = {
     tie('l_tie_fwd', 'coolant', 'l.fwd', 'l.aft', 'spine', [0, -9.0, -10], {
       label: 'FORWARD CROSS-CONNECT', cap: 0.5, leak: 0.1,
     }),
-    tie('l_tie_bat', 'coolant', 'l.batF', 'l.batA', 'coredeck', [6.0, -5.0, 8], {
+    tie('l_tie_bat', 'coolant', 'l.batF', 'l.batA', 'magdeck', [-8.0, 2.4, 6], {
       label: 'BATTERY CROSS-CONNECT', cap: 0.5, leak: 0.1,
     }),
 
@@ -1465,13 +1474,13 @@ const BASTION = {
 
     // Casualty routing. The power ring was already right; the other two
     // networks were trees hanging off it.
-    tie('c_tie_citadel', 'power', 'p.ring', 'p.citadel', 'citadel', [6, -6, -12], {
+    tie('c_tie_citadel', 'power', 'p.ring', 'p.citadel', 'fwdhold', [8, 6, -12], {
       label: 'CITADEL ALTERNATE', cap: 0.5,
     }),
     tie('c_tie_fire', 'data', 'd.fireR', 'd.fireL', 'spine', [0, 14, 10], {
       label: 'DIRECTOR CROSS-TIE', cap: 0.6,
     }),
-    tie('c_tie_eng', 'data', 'd.fireR', 'd.eng', 'engineering', [12, 12, -18], {
+    tie('c_tie_eng', 'data', 'd.fireR', 'd.eng', 'magdeck', [12, 4, -10], {
       label: 'DC ALTERNATE', cap: 0.5,
     }),
     tie('l_tie_core', 'coolant', 'l.core', 'l.aft', 'engineering', [0, -14, -18], {
@@ -1480,7 +1489,7 @@ const BASTION = {
     tie('l_tie_fwd', 'coolant', 'l.aft', 'l.fwd', 'magdeck', [0, -6, 0], {
       label: 'FORWARD CROSS-CONNECT', cap: 0.5, leak: 0.1,
     }),
-    tie('l_tie_bat', 'coolant', 'l.batF', 'l.batA', 'coredeck', [8, -6, 12], {
+    tie('l_tie_bat', 'coolant', 'l.batF', 'l.batA', 'magdeck', [-12, 4, 10], {
       label: 'BATTERY CROSS-CONNECT', cap: 0.5, leak: 0.1,
     }),
 

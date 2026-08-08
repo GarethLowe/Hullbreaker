@@ -7,7 +7,7 @@
 // network solver, the shield model, decompression or the crew's pathing, this
 // says so in under a second.
 // -----------------------------------------------------------------------------
-import { HULLS, ENGAGEMENT_RANGE } from '../src/ship/hulls.js';
+import { HULLS, ENGAGEMENT_RANGE, NETS } from '../src/ship/hulls.js';
 import { Systems, ATMO_CRITICAL } from '../src/ship/systems.js';
 import { Crew } from '../src/ship/crew.js';
 import { Body, Autopilot } from '../src/ship/flight.js';
@@ -235,6 +235,100 @@ for (const [id, h] of Object.entries(HULLS)) {
     }
     ok(`${id}: no single run isolates anything`, orphaned.length === 0,
       orphaned.slice(0, 3).join('; '));
+  }
+}
+
+// --- and no single COMPARTMENT may end a branch either -----------------------
+// The single-run rule above is not the test that matters, because damage does
+// not arrive as one severed cable. It arrives as a compartment being opened and
+// everything inside it wrecked — so a tie laid alongside the run it backs up is
+// not redundancy, it is a second thing to lose to the same round.
+//
+// Every tie was originally authored next to its primary. Both of the picket's
+// power trunks sat in engineering, and both of the frigate's, so either ship
+// went completely dark the moment that compartment was hit — with the tie
+// intact in the wreckage beside the trunk it was supposed to replace.
+//
+// Nodes gated by a `sole` run are exempt, and so is anything downstream of one:
+// a gun hoist is meant to be its turret's only feed, and a picket carrying one
+// computer in its bridge is meant to lose fire control with the bridge.
+{
+  const reach = (hull, net, cut) => {
+    const lvl = new Map();
+    const cond = hull.modules.filter((m) => m.kind === 'conduit' && m.net === net);
+    for (const c of cond) {
+      if (c.from.startsWith('src.')) {
+        lvl.set(c.from, 1);
+      }
+    }
+    let go = true;
+    while (go) {
+      go = false;
+      for (const c of cond) {
+        if (cut.has(c.id)) {
+          continue;
+        }
+        const a = lvl.get(c.from) || 0;
+        const b = lvl.get(c.to) || 0;
+        if (Math.min(a, c.cap) > b + 1e-9) {
+          lvl.set(c.to, Math.min(a, c.cap));
+          go = true;
+        }
+        if (Math.min(b, c.cap) > a + 1e-9) {
+          lvl.set(c.from, Math.min(b, c.cap));
+          go = true;
+        }
+      }
+    }
+    return lvl;
+  };
+
+  for (const [id, hull] of Object.entries(HULLS)) {
+    const needed = new Set();
+    for (const m of hull.modules) {
+      if (m.needs) {
+        for (const [net, node] of Object.entries(m.needs)) {
+          needed.add(`${net}:${node}`);
+        }
+      }
+    }
+    needed.add('data:d.helm');
+    needed.add('data:d.eng');
+
+    const base = {};
+    const fragile = new Set();
+    const soleCut = new Set(hull.modules
+      .filter((m) => m.kind === 'conduit' && m.sole).map((m) => m.id));
+    for (const net of NETS) {
+      base[net] = reach(hull, net, new Set());
+      // Anything that depends on a deliberate single feed, directly or not.
+      const withoutSole = reach(hull, net, soleCut);
+      for (const node of base[net].keys()) {
+        if (!(withoutSole.get(node) > 0)) {
+          fragile.add(`${net}:${node}`);
+        }
+      }
+    }
+
+    const orphaned = [];
+    for (const sec of hull.sections) {
+      const cut = new Set(hull.modules
+        .filter((m) => m.kind === 'conduit' && m.section === sec.id).map((m) => m.id));
+      if (cut.size === 0) {
+        continue;
+      }
+      for (const net of NETS) {
+        const after = reach(hull, net, cut);
+        for (const node of base[net].keys()) {
+          const key = `${net}:${node}`;
+          if (needed.has(key) && !fragile.has(key) && !(after.get(node) > 0)) {
+            orphaned.push(`${sec.id} -> ${key}`);
+          }
+        }
+      }
+    }
+    ok(`${id}: survives losing any one whole compartment`, orphaned.length === 0,
+      orphaned.slice(0, 4).join('; '));
   }
 }
 
@@ -1073,6 +1167,72 @@ for (const [id, h] of Object.entries(HULLS)) {
   // It cannot conjure people.
   ok('cross-decking moves hands, it does not make them',
     crew.headcount <= crew.complementMax);
+}
+
+// --- holes are welded in parallel, at a rate set by the plate ---------------
+// Reported as jobs queuing: three breaches showing, one shrinking. They were
+// all being worked; the second and third were simply slower, because welding
+// cost `plateMax / 12` joules per square metre — the compartment's total HULL
+// POINTS, which has nothing to do with closing a hole. A big room was slower to
+// patch than a small one made of identical plate, and a dreadnought's
+// compartments were glacial purely for being large: 51 seconds a square metre
+// against a picket's one. Thickness is what a welder actually fights.
+{
+  const hull = HULLS.meridian;
+  const sys = new Systems(hull);
+  const crew = new Crew(hull, sys);
+  run(sys, 2, crew);
+  const secs = ['forehold', 'engineering', 'spine'];
+  for (const id of secs) {
+    sys.punchHole(id, 4);
+  }
+  // Dispatch is what must be parallel. Arrival is not: crossing a breached,
+  // airless compartment costs about fifteen seconds a hop, so the far hole is
+  // legitimately untouched while its parties are still walking to it.
+  run(sys, 1, crew);
+  const assigned = secs.map((id) => crew.parties.filter((q) => q.size > 0 && q.task
+    && q.task.kind === 'patch' && q.task.target === id).length);
+  ok('parties are dispatched to every open compartment at once',
+    assigned.every((n) => n > 0),
+    secs.map((id, i) => `${id}:${assigned[i]}`).join(' '));
+
+  const before = secs.map((id) => sys.section(id).breachSize);
+  run(sys, 45, crew);
+  const after = secs.map((id) => sys.section(id).breachSize);
+  ok('and every one of them is worked down',
+    after.every((a, i) => a < before[i]),
+    secs.map((id, i) => `${id} ${before[i].toFixed(1)}->${after[i].toFixed(1)}`).join(' '));
+
+  run(sys, 240, crew);
+  ok('and the hull gets closed in a sane time', sys.breachArea() === 0,
+    `${sys.breachArea().toFixed(1)} m² still open`);
+}
+
+// --- welding depends on the plate, not the size of the room -----------------
+{
+  const hull = HULLS.meridian;
+  const sys = new Systems(hull);
+  run(sys, 1);
+  // Two compartments with very different plate POOLS but similar thickness
+  // should weld at similar rates; the thick-belted one should be slower.
+  const thin = hull.sections.find((x) => x.id === 'batteryLF');
+  const thick = hull.sections.find((x) => x.id === 'spine');
+  ok('the test picks compartments with genuinely different plate', thick.wall > thin.wall);
+  const close = (id, joules) => {
+    sys.punchHole(id, 6);
+    const b0 = sys.section(id).breachSize;
+    sys.patchSection(id, joules);
+    return b0 - sys.section(id).breachSize;
+  };
+  const thinClosed = close(thin.id, 1e6);
+  const thickClosed = close(thick.id, 1e6);
+  ok('thicker plate welds slower', thickClosed < thinClosed,
+    `${thin.id} ${thinClosed.toFixed(3)} m² vs ${thick.id} ${thickClosed.toFixed(3)} m²`);
+  // ...and in proportion to thickness, not to the HP pool.
+  const ratio = thinClosed / thickClosed;
+  const wallRatio = thick.wall / thin.wall;
+  ok('...in proportion to thickness', Math.abs(ratio - wallRatio) < 0.05,
+    `rate ratio ${ratio.toFixed(2)} vs wall ratio ${wallRatio.toFixed(2)}`);
 }
 
 // --- a vented compartment is still a job ------------------------------------

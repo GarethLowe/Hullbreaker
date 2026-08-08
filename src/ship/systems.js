@@ -54,6 +54,23 @@ const VENT_AREA_FRAC = 0.004;
 const FRAME_REPAIR_FRAC = 0.22;
 
 /**
+ * Work needed to weld a square metre shut, per metre of plate thickness.
+ *
+ * Welding used to cost `plateMax / 12` joules per square metre — that is, the
+ * speed depended on the compartment's total HULL POINTS, which has nothing to
+ * do with closing a hole. A big room was slower to patch than a small one made
+ * of the same plate, and a dreadnought's compartments were glacial purely
+ * because they are large: 51 seconds a square metre on a BASTION spine against
+ * one second on a SABRE pod, so a 7 m² hole took the better part of twenty
+ * minutes and looked to the player as though the parties were queuing.
+ *
+ * Thickness is what a welder actually fights. Calibrated so a MERIDIAN is
+ * unchanged; the dreadnought gets a quarter of its time back and the picket,
+ * whose plate really is thin, loses a little.
+ */
+const WELD_PER_M2 = 6.0e6;
+
+/**
  * What fraction of its rating a run actually carries, from its condition.
  *
  * A conduit used to be a switch: intact or severed, with nothing in between.
@@ -813,8 +830,10 @@ export class Systems {
     }
     const applied = Math.min(joules, s.plateMax - s.plateHp);
     s.plateHp += applied;
-    // Welding closes area, so the rate is in square metres per joule of work.
-    s.breachSize = Math.max(0, s.breachSize - (joules / Math.max(s.plateMax, 1)) * 12);
+    // Welding closes area, and what it costs is set by how thick the plate is —
+    // not by how much hull the compartment happens to be worth. See WELD_PER_M2.
+    const perM2 = WELD_PER_M2 * Math.max(s.def.wall, 0.05);
+    s.breachSize = Math.max(0, s.breachSize - joules / perM2);
     if (s.breached && s.breachSize <= 0.02 && s.plateHp > s.plateMax * 0.25) {
       s.breachSize = 0;
       s.breached = false;

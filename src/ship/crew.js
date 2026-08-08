@@ -447,10 +447,33 @@ export class Crew {
     // instead of all converging on whatever scored highest.
     this._solveCache.clear();
     this._load.clear();
+    // `repairing` is DERIVED from who is on the job, never set and forgotten.
+    //
+    // It used to be a flag the crew raised when a party started work and
+    // lowered when it finished, which had no single owner once several parties
+    // could be on one fitting — and no owner at all once the party that raised
+    // it stopped for a reason other than finishing. A blast that killed the
+    // working parties left three fittings flagged with nobody on them, showing
+    // a spanner that pulsed forever on work that had stopped; meanwhile a
+    // fitting a party was walking to showed nothing at all.
+    //
+    // Recomputing it costs one pass over the modules and tells the truth by
+    // construction, including the case the flag could never express: a job
+    // being handed from one party to another without a gap.
+    for (const m of this.sys.modules.values()) {
+      m.repairing = false;
+    }
     for (const q of this.parties) {
-      if (q.size > 0 && q.task) {
-        const k = q.task.kind + ':' + q.task.target;
-        this._load.set(k, (this._load.get(k) || 0) + q.size);
+      if (q.size <= 0 || !q.task) {
+        continue;
+      }
+      const k = q.task.kind + ':' + q.task.target;
+      this._load.set(k, (this._load.get(k) || 0) + q.size);
+      if (q.task.kind === 'repair') {
+        const m = this.sys.get(q.task.target);
+        if (m) {
+          m.repairing = true;
+        }
       }
     }
     for (const q of this.parties) {
@@ -752,9 +775,6 @@ export class Crew {
       case 'repair': {
         const mod = this.sys.get(task.target);
         if (!mod || mod.hp >= mod.maxHp) {
-          if (mod) {
-            mod.repairing = false;
-          }
           d.task = null;
           break;
         }
@@ -764,19 +784,16 @@ export class Crew {
           d.task = { kind: 'fire', target: s.id };
           break;
         }
-        mod.repairing = true;
         const want = REPAIR_PER_HAND * effort * dt;
         const spares = this.sys.takeSpares(want / JOULES_PER_SPARE);
         if (spares <= 0) {
-          mod.repairing = false;
           d.task = null;
           this.events.push({ type: 'noSpares' });
           break;
         }
         this.sys.repairModule(mod.id, Math.min(want, spares * JOULES_PER_SPARE));
         if (mod.hp >= mod.maxHp) {
-          mod.repairing = false;
-          this.events.push({ type: 'repaired', module: mod, by: d });
+          this.events.push({ type: 'repaired', module: mod, by: d.div });
           d.task = null;
         }
         break;
@@ -821,7 +838,12 @@ export class Crew {
    * its drives back and one that drifts.
    */
   _worthManning(d) {
-    const crippled = this.sys.driveAuthority() < 0.15 || this.sys.integrity < 0.5;
+    // Three compartments open to space is not a gunnery problem, it is an
+    // all-hands one: a watch standing at a mount while the ship comes apart
+    // around it is the same mistake as an engineering watch sitting on a wreck.
+    const crippled = this.sys.driveAuthority() < 0.15
+      || this.sys.integrity < 0.5
+      || this.sys.breachCount() >= 3;
     if (!crippled) {
       return true;
     }
@@ -900,16 +922,27 @@ export class Crew {
         if (!q.task && !q.heading) {
           continue;
         }
-        const kind = q.task ? q.task.kind : 'moving';
+        // Walking to a job is not doing it. A party three compartments away with
+        // a patch task was listed as WELDING, so a hole with fourteen hands
+        // assigned and nobody there yet looked like a job that had stalled —
+        // which is exactly what it was reported as. Crossing a breached, airless
+        // compartment costs about fifteen seconds a hop, and the panel should
+        // say so rather than imply work is happening.
+        const kind = q.heading ? 'moving' : q.task.kind;
         const target = q.task ? q.task.target : q.heading;
+        // The DISPLAY kind says whether they are there yet; the job kind says
+        // what the target is, and the two must not be confused — looking a
+        // module up as a compartment because its party happened to be walking
+        // is how a fitting's name turns back into an id in the panel.
+        const jobKind = q.task ? q.task.kind : 'moving';
         const k = kind + ':' + target;
-        const at = byJob.get(k) || { kind, target, hands: 0, parties: 0 };
+        const at = byJob.get(k) || { kind, jobKind, target, hands: 0, parties: 0 };
         at.hands += q.size;
         at.parties += 1;
         byJob.set(k, at);
       }
       const label = (j) => {
-        if (j.kind === 'repair') {
+        if (j.jobKind === 'repair') {
           const m = this.sys.get(j.target);
           return m ? m.label : j.target;
         }
@@ -923,7 +956,7 @@ export class Crew {
        * down, so a breach reports square metres and a repair reports condition.
        */
       const note = (j) => {
-        if (j.kind === 'repair') {
+        if (j.jobKind === 'repair') {
           const m = this.sys.get(j.target);
           return m ? `${Math.round(clamp01(m.hp / m.maxHp) * 100)}%` : '';
         }
@@ -931,10 +964,10 @@ export class Crew {
         if (!sec) {
           return '';
         }
-        if (j.kind === 'patch') {
+        if (j.jobKind === 'patch') {
           return sec.breachSize > 0 ? `${sec.breachSize.toFixed(1)}m²` : 'frame';
         }
-        if (j.kind === 'fire') {
+        if (j.jobKind === 'fire') {
           return `${sec.fire.toFixed(0)}`;
         }
         return '';

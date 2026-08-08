@@ -525,6 +525,45 @@ A wrecked bay keeps 40% of its stock now, lying in the compartment where anyone
 can pick it up. Running your stores down over a long engagement is the
 interesting failure; having them deleted by one hit was the arbitrary one.
 
+#### Welding depends on the plate, not the size of the room
+
+Closing a breach cost `plateMax / 12` joules per square metre — the
+compartment's total HULL POINTS, which has nothing to do with welding a hole. A
+big room was slower to patch than a small one made of identical plate, and a
+dreadnought's compartments were glacial purely for being large:
+
+| | slowest compartment | fastest |
+|-|-|-|
+| SABRE | spine, 4 s/m² | podR, 1 s/m² |
+| MERIDIAN | spine, 23 s/m² | batteryRA, 10 s/m² |
+| BASTION | spine, 51 s/m² | batteryRA, 23 s/m² |
+
+A 7 m² hole in a cruiser's engineering bay was the better part of twenty minutes
+with six hands, which reads from the panel as parties queuing. Thickness is what
+a welder actually fights, so that is what it costs now — calibrated to leave the
+MERIDIAN unchanged, give the dreadnought a quarter of its time back and cost the
+picket, whose plate really is thin, a little.
+
+#### Walking to a job is not doing it
+
+Damage control dispatches to every open compartment at once — that was never the
+problem. But crossing a breached, airless compartment costs about fifteen
+seconds a hop, so a hole two compartments away sits untouched while its parties
+walk, and the panel called them WELDING the whole time. It says `→` until they
+arrive, and will show both rows for one job when some parties are on site and
+others are still coming.
+
+```
+GUNNERY FORWARD  55/55  FORWARD BATTERY  MOVING 8/9
+   →     FORWARD HOLD                4.0m²   49
+DAMAGE CONTROL A 65/65  MAIN SPINE       PATCH 11/11
+   WELD  MAIN SPINE                  3.7m²   65
+```
+
+Three compartments open is also an all-hands emergency now, not a gunnery
+problem: the station watches turn out and leave a skeleton, on the same rule
+that empties a wreck's posts.
+
 #### The roster says what each party is on
 
 With divisions split into parties, one state per division stopped meaning
