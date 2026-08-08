@@ -29,9 +29,19 @@ import * as THREE from 'three';
 import { rand, clamp, smoothstep } from '../core/mathx.js';
 import { ENGAGEMENT_RANGE } from '../ship/hulls.js';
 
-/** Half-extents of the two dust cubes. Motes wrap when they leave them. */
-const DUST_NEAR = { span: 1300, count: 11000, size: 0.5, bright: 1.0 };
-const DUST_FAR = { span: 5200, count: 3600, size: 1.1, bright: 0.45 };
+/**
+ * Half-extents of the two dust cubes. Motes wrap when they leave them.
+ *
+ * `bright` overdrives past 1.0 on purpose. A mote is two or three pixels of
+ * additive blend against a sky that already sits at luminance 38, and at the
+ * old 1.0/0.45 the whole layer moved the 99.9th percentile of the frame by ten
+ * levels out of 255 between a standstill and full boost — the sense of speed
+ * was there, but you had to know to look for it. The headroom goes into the
+ * bright tail rather than the floor, so the field gains contrast instead of
+ * turning into grey haze.
+ */
+const DUST_NEAR = { span: 1300, count: 24000, size: 0.5, bright: 2.1 };
+const DUST_FAR = { span: 5200, count: 8000, size: 1.1, bright: 1.05 };
 
 const STAR_COUNT = 2200;
 
@@ -380,7 +390,11 @@ export class Space {
       pos[i * 3] = rand(-spec.span, spec.span);
       pos[i * 3 + 1] = rand(-spec.span, spec.span);
       pos[i * 3 + 2] = rand(-spec.span, spec.span);
-      const b = rand(0.35, 1.0) * spec.bright;
+      // Wider spread than the old 0.35..1.0. Contrast is the point: a field
+      // where every mote is the same middling grey reads as film grain however
+      // bright it is, and a field with a dim majority and a sparse bright few
+      // reads as depth.
+      const b = rand(0.18, 1.0) * spec.bright;
       colour[i * 3] = b * 0.80;
       colour[i * 3 + 1] = b * 0.88;
       colour[i * 3 + 2] = b;
@@ -448,10 +462,16 @@ export class Space {
           // Fade in from the near plane so motes do not pop into existence
           // bright, and out at the shell edge so the cube has no visible wall.
           float near = smoothstep(0.0, 90.0, dist);
-          float far = 1.0 - smoothstep(uSpan * 0.55, uSpan, dist);
+          // 0.72, not 0.55. The cube is a cube but the fade is radial, so the
+          // old figure began dimming motes barely past half the shell and threw
+          // away most of the field before it ever reached the frustum: only
+          // four hundredths of one per cent of the frame was ever lit by dust.
+          float far = 1.0 - smoothstep(uSpan * 0.72, uSpan, dist);
           // Nearly invisible at rest, blazing past under way. Speed is what the
-          // layer is FOR; at a constant brightness it is just confetti.
-          vAlpha = fine * near * far * (0.12 + 0.88 * uSpeed);
+          // layer is FOR; at a constant brightness it is just confetti. The
+          // floor drops as the ceiling rises, so overdriving the per-mote
+          // brightness buys contrast under way without lighting a parked ship.
+          vAlpha = fine * near * far * (0.07 + 0.93 * uSpeed);
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: POINT_FRAG,
