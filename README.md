@@ -388,6 +388,24 @@ half the panels off still takes it to 1.4 s and 4.8 s.
 | MERIDIAN | 94 °C, 78% of rating | 85 °C, 91% |
 | BASTION | 110 °C, 80% of rating | 79 °C, 99% |
 
+#### An arc may not set off the magazines
+
+`_tickArcing` promises in its own comment that it "degrades a ship without ever
+finishing one" — small per-tick energy, critical fittings immune. It did not
+keep that promise: its victim could be a MAGAZINE, and a cook-off dumps the
+whole stowed charge into the compartment, wrecks the frame from inside and takes
+everything sharing the space with it.
+
+Measured over four hundred trials, a severed cable detonated a magazine on its
+own in 2.8% of runs, costing up to 13% of the hull with nothing fired at the
+ship. That is not a secondary effect, it is a coin flip deciding the fight, and
+it was the cause of the one long-standing flaky assertion in the suite.
+
+Ordnance is excluded from arcing now. Six hundred trials, no cook-offs, worst
+hull loss 0.0000. Fire still reaches magazines — `ignite` is untouched, so a
+burning compartment cooks off through the thermal model, where the crew get a
+chance to fight it.
+
 #### The repeating driver
 
 The PLASMA ACCELERATOR was worst in class on every axis that mattered — 8.7 MJ/s

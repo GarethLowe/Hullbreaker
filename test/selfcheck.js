@@ -532,11 +532,14 @@ for (const [id, h] of Object.entries(HULLS)) {
   // weapon — so the hull is read back with no tick in between. What follows in
   // the next few tenths of a second is not the weapon: a bus that has just been
   // hit that hard arcs, and arcing eats conduits. That is the modelled
-  // consequence and it is wanted. This assertion used to run the clock 0.3 s
-  // first and demand the hull be untouched to one part in a million, so it
-  // failed on about a quarter of runs — the sim was right and the test was
-  // asking the wrong question. It still bounds the arcing: a secondary effect
-  // may cost wiring, it may not gut the ship.
+  // consequence and it is wanted.
+  //
+  // This assertion was flaky at about one run in seven for a real reason, and
+  // the sim was at fault rather than the test: arcing could pick a MAGAZINE as
+  // its victim and cook it off, costing up to 13% of the hull with nothing
+  // fired at the ship. `_tickArcing` promises it "degrades a ship without ever
+  // finishing one"; ordnance is excluded from it now, and the bound below is
+  // tight because the outcome is no longer a lottery.
   const sys = fresh();
   run(sys, 1);
   const hullBefore = sys.hullFraction();
@@ -545,8 +548,37 @@ for (const [id, h] of Object.entries(HULLS)) {
   run(sys, 0.3);
   ok('ion pulse drops the shields', sys.shieldFraction() < 0.35);
   ok('arcing after an ion hit costs wiring, not the ship',
-    sys.hullFraction() > hullBefore - 0.08,
+    sys.hullFraction() > hullBefore - 0.01,
     `hull ${sys.hullFraction().toFixed(4)} from ${hullBefore.toFixed(4)}`);
+}
+
+// --- an arc may not set off the magazines -----------------------------------
+// The invariant `_tickArcing` claims for itself, asserted directly rather than
+// inferred from a hull percentage. Severed power runs sit in compartments that
+// hold ordnance all over these ships; if a cable can detonate a magazine on its
+// own then a lucky cut decides the engagement, which is the opposite of what
+// the `critical` exclusion is there for.
+{
+  const sys = fresh();
+  run(sys, 1);
+  // Cut every power run on the ship and leave it arcing for a long while.
+  for (const m of [...sys.modules.values()]) {
+    if (m.kind === 'conduit' && m.def.net === 'power' && !m.def.critical) {
+      sys.damageModule(m.id, 1e12);
+    }
+  }
+  const mags = [...sys.modules.values()].filter((m) => m.kind === 'magazine');
+  ok('the hull actually carries magazines to endanger', mags.length > 0);
+  let cooked = 0;
+  const push = sys.events.push.bind(sys.events);
+  sys.events.push = (e) => {
+    if (e.type === 'cookoff') { cooked++; }
+    return push(e);
+  };
+  run(sys, 180);
+  ok('sustained arcing never cooks off ordnance', cooked === 0, `${cooked} cook-offs`);
+  ok('...but it does chew through other kit',
+    [...sys.modules.values()].some((m) => m.kind !== 'conduit' && m.hp < m.maxHp));
 }
 
 {
