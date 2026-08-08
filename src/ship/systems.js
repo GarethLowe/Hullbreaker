@@ -1747,6 +1747,17 @@ export class Systems {
     return max > 0 ? clamp01(load / max) : 0;
   }
 
+  /** Open hull, in square metres, across every breached compartment. */
+  breachArea() {
+    let a = 0;
+    for (const s of this.sections.values()) {
+      if (s.breached) {
+        a += s.breachSize;
+      }
+    }
+    return a;
+  }
+
   hullFraction() {
     let hp = 0;
     let max = 0;

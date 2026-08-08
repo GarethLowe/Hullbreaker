@@ -916,6 +916,29 @@ export class Crew {
         const sec = this.hull.sectionById[j.target];
         return sec ? sec.label : j.target;
       };
+      /**
+       * How far along, in the unit the job is actually measured in. "Twenty-two
+       * parties patching" is a useless read-out on its own — what a damage
+       * control officer needs is how much hole is left and whether it is going
+       * down, so a breach reports square metres and a repair reports condition.
+       */
+      const note = (j) => {
+        if (j.kind === 'repair') {
+          const m = this.sys.get(j.target);
+          return m ? `${Math.round(clamp01(m.hp / m.maxHp) * 100)}%` : '';
+        }
+        const sec = this.sys.section(j.target);
+        if (!sec) {
+          return '';
+        }
+        if (j.kind === 'patch') {
+          return sec.breachSize > 0 ? `${sec.breachSize.toFixed(1)}m²` : 'frame';
+        }
+        if (j.kind === 'fire') {
+          return `${sec.fire.toFixed(0)}`;
+        }
+        return '';
+      };
       return {
         name: d.name,
         role: d.role,
@@ -931,7 +954,9 @@ export class Crew {
         /** One entry per distinct job this division has parties on. */
         jobs: [...byJob.values()]
           .sort((a, b) => b.hands - a.hands)
-          .map((j) => ({ kind: j.kind, hands: Math.round(j.hands), what: label(j) })),
+          .map((j) => ({
+            kind: j.kind, hands: Math.round(j.hands), what: label(j), note: note(j),
+          })),
       };
     });
   }

@@ -533,14 +533,27 @@ six compartments" equally badly. Each division now lists what its parties are
 severally working, grouped by job so eleven parties on four jobs read as four
 lines, with the fitting named and the hands on it.
 
+Each line carries how far along it is, in the unit the job is actually measured
+in — a breach reports the square metres still open, a repair reports condition —
+and the panel foots with how much hull is open in total, so "everybody is
+patching" finally has a denominator.
+
 ```
-GUNNERY PORT      45/45  PORT BATTERY FWD   REPAIR 8/8
-   FIX  PORT RADIATOR FWD                          17
-   FIX  PORT ROLL JETS                             17
-   FIX  PORT BROADSIDE FWD                         11
+GUNNERY PORT      42/45  PORT BATTERY FWD   REPAIR 8/8
+   WELD  PORT BATTERY FWD                  4.3m²   16
+   FIX   PORT FWD FEED                       35%   11
+   FIX   PORT ROLL JETS                       5%    5
+   FIX   PORT RADIATOR FWD                    4%    5
 DAMAGE CONTROL A  65/65  MAIN SPINE         MOVING 11/11
-   FIX  DORSAL RUN                                 24
+   WELD  MAIN SPINE                        4.3m²   30
+   WELD  FORWARD HOLD                      5.0m²   18
+
+HULL OPEN — 6 compartments, 27.5 m²
 ```
+
+Twenty-two parties on patch duty turns out to be six holes with three parties on
+each — the crowding spreading them exactly as intended — plus twenty-one more on
+repairs. That was always what was happening; there was simply no way to see it.
 
 #### Damage control works in parties, not as a mob
 

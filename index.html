@@ -413,7 +413,7 @@
   /* What each division's parties are severally working on. */
   .crew-job {
     display: grid;
-    grid-template-columns: 34px 1fr auto;
+    grid-template-columns: 30px 1fr 44px 20px;
     gap: 6px;
     padding-left: 10px;
     font-size: 8px;
@@ -422,7 +422,9 @@
   }
   .crew-job-k { color: var(--accent); opacity: 0.75; }
   .crew-job-w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .crew-job-n { font-variant-numeric: tabular-nums; }
+  .crew-job-p { color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+  .crew-job-n { text-align: right; font-variant-numeric: tabular-nums; }
+  .crew-foot.bad { color: var(--warn); }
   .crew-foot {
     margin-top: 4px;
     padding-top: 4px;

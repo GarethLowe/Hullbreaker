@@ -376,8 +376,16 @@ export class Diagnostics {
       for (const j of c.jobs || []) {
         html += `<div class="crew-job"><span class="crew-job-k">${JOB_VERB[j.kind] || j.kind}</span>`
           + `<span class="crew-job-w">${j.what}</span>`
+          + `<span class="crew-job-p">${j.note}</span>`
           + `<span class="crew-job-n">${j.hands}</span></div>`;
       }
+    }
+    // How much hole there is, so "everybody is patching" has a denominator.
+    const breaches = ship.sys.breachCount();
+    const area = ship.sys.breachArea();
+    if (breaches > 0) {
+      html += `<div class="crew-foot bad">HULL OPEN — ${breaches} compartment`
+        + `${breaches === 1 ? '' : 's'}, ${area.toFixed(1)} m²</div>`;
     }
     const spares = ship.sys.totalSpares();
     html += `<div class="crew-foot">SPARES ${spares}`
