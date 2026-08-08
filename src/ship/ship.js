@@ -74,6 +74,18 @@ const RECOIL_RETURN = 5.5;
  * when the two disagree the metal wins.
  */
 export const MOUNT_DEPRESSION = 0.09;
+
+/**
+ * How far off its firing solution a mount may be and still be worth shooting.
+ *
+ * Every gun fired whenever the trigger was held, whether it could bear or not —
+ * so a broadside hull with its port battery hard against the stop emptied those
+ * magazines into empty space on every burst, and the player paid for it in
+ * ammunition without ever putting a round near the target. About a degree and a
+ * half, widened by the target's angular size.
+ */
+const BEAR_TOL = 0.026;
+const BEAR_COS = Math.cos(BEAR_TOL);
 /** Scratch for that clamp; `_aimMount` is holding most of the others. */
 const _mnt = new THREE.Vector3();
 const _mntT = new THREE.Vector3();
@@ -384,6 +396,8 @@ export class Ship {
         ),
         rest: new THREE.Vector3(...def.dir).normalize(),
         aim: new THREE.Vector3(...def.dir).normalize(),
+        /** Where fire control wants this mount, unclamped. See `_bears`. */
+        want: new THREE.Vector3(...def.dir).normalize(),
         cool: 0,
         firing: false,
         beamT: 0,
@@ -923,6 +937,7 @@ export class Ship {
     const rest = _v.copy(mount.rest).applyQuaternion(this.body.quat);
     const laid = mount.traverses && this.sys.hasData(mount.mod);
     if (!laid) {
+      mount.want.copy(rest);
       mount.aim.lerp(rest, 1 - Math.exp(-6 * dt)).normalize();
       this._clampToMount(mount);
       return;
@@ -973,6 +988,10 @@ export class Ship {
       _v2.addScaledVector(_lay, Math.sin(ph * 0.67) * slop).normalize();
     }
 
+    // What fire control asked for, before the traverse limit has its say. The
+    // gap between this and where the gun ends up pointing is the whole question
+    // of whether it is worth pulling the trigger — see `_bears`.
+    mount.want.copy(_v2);
     // Clamp the demand into the mount's traverse arc about its rest bearing.
     const dot = clamp(_v2.dot(rest), -1, 1);
     const arc = mount.def.arc;
@@ -1089,6 +1108,34 @@ export class Ship {
     return null;
   }
 
+  /**
+   * Is this mount actually laid on the firing solution?
+   *
+   * Compares where the gun IS to where fire control asked it to be, which is
+   * the only comparison that works in every case: a mount clamped at its
+   * traverse stop can never reach the demand, and one still slewing has not got
+   * there yet. Both were firing anyway.
+   *
+   * Comparing against the target's position instead would be wrong — a gun
+   * correctly leading a crossing target is deliberately not pointing at it.
+   *
+   * The cone widens with how much sky the target subtends, so a dreadnought at
+   * knife range does not demand the same precision as a picket at eight
+   * kilometres.
+   */
+  _bears(mount, target) {
+    if (mount.aim.dot(mount.want) > BEAR_COS) {
+      return true;
+    }
+    if (!target) {
+      return false;
+    }
+    // Close in, a hull is wide enough that a partly-trained gun still hits it.
+    this.localToWorld(mount.origin, _o);
+    const dist = Math.max(target.position.distanceTo(_o), 1);
+    return mount.aim.dot(mount.want) > Math.cos(BEAR_TOL + target.hitRadius / dist);
+  }
+
   /** True if this mount is pointing close enough to be worth firing. */
   onTarget(mount, target, tolerance = 0.045) {
     if (!target) {
@@ -1132,8 +1179,11 @@ export class Ship {
         // that is not cycling is hotel load, not a 2.6 MW appliance.
         mod.duty = Math.max(0, (mod.duty || 0) - dt * 2.5);
 
+        // A gun that cannot bear holds fire. This is the difference between
+        // squeezing the trigger and wasting the magazine.
+        mount.bears = this._bears(mount, target);
         if (w.kind === 'beam') {
-          const want = held && live && this._canDraw(w.draw * dt);
+          const want = held && live && mount.bears && this._canDraw(w.draw * dt);
           mount.firing = want;
           if (want) {
             mod.duty = 1;
@@ -1146,7 +1196,7 @@ export class Ship {
         }
 
         mount.firing = false;
-        if (!held || !live || mount.cool > 0) {
+        if (!held || !live || !mount.bears || mount.cool > 0) {
           continue;
         }
         if (!this._takeAmmo(mount)) {

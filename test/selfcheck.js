@@ -1791,6 +1791,42 @@ for (const [id, h] of Object.entries(HULLS)) {
       worst < 1e-9, `worst error ${worst.toExponential(2)}`);
   }
 
+  // A gun that cannot bear holds its fire.
+  //
+  // Every mount fired whenever the trigger was held, bearing or not — so on a
+  // broadside hull pointed at something, the whole off-side battery emptied
+  // itself into empty space. Eight repeating drivers at 240 rpm is about three
+  // hundred rounds per ten seconds of held trigger, bought and paid for by the
+  // player and guaranteed to miss.
+  //
+  // The test is aim against the SOLUTION, never against the target's position:
+  // a gun correctly leading a crossing target is deliberately not pointing at
+  // it, and comparing the two would hold fire exactly when the shot is good.
+  {
+    const ship = Object.create(Ship.prototype);
+    ship.body = { quat: new Quaternion() };
+    ship.localToWorld = (local, out) => out.copy(local);
+    const at = (x, y, z) => new Vector3(x, y, z).normalize();
+    const mount = (aim, want) => ({ aim: at(...aim), want: at(...want), origin: new Vector3() });
+
+    ok('a mount laid on the solution bears',
+      ship._bears(mount([0, 0, 1], [0, 0, 1]), null));
+    ok('a mount hard against its stop does not',
+      !ship._bears(mount([0, 0, 1], [0.6, 0, 0.8]), null));
+    ok('nor does one still slewing onto it',
+      !ship._bears(mount([0, 0, 1], [0.12, 0, 0.99]), null));
+
+    // Angular size buys slack: the same error is a hit on something big and
+    // close, and a miss on something small and far.
+    const off = mount([0, 0, 1], [0.05, 0, 0.999]);
+    const near = { position: new Vector3(0, 0, 900), hitRadius: 126 };
+    const far = { position: new Vector3(0, 0, 9000), hitRadius: 48 };
+    ok('...and a wide target close in is still worth shooting at',
+      ship._bears(off, near));
+    ok('...while the same lay misses a small one far off',
+      !ship._bears(off, far));
+  }
+
   // Every gun has to be able to join a fight the ship can actually have.
   //
   // The original form of this asserted every mount could traverse onto the

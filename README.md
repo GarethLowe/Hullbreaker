@@ -216,6 +216,37 @@ up and *aft* — 135 degrees off the bow with a 75 degree arc, sixty degrees sho
 — so triggering the point-defence group fired a third of it into empty space no
 matter what the ship was pointing at.
 
+#### A gun that cannot bear holds its fire
+
+The other half of that clamp went unread for just as long. A mount pinned
+against its traverse stop still fired every time the trigger was held, because
+`updateWeapons` asked whether the group was triggered and never whether the
+barrel had arrived. Point the MERIDIAN at something and its entire off-side
+battery emptied itself into space: eight repeating drivers at 240 rpm is about
+three hundred rounds per ten seconds of held trigger, bought by the player and
+guaranteed to miss.
+
+The test is aim against the *solution*, never against the target's position. A
+gun correctly leading a crossing target is deliberately not pointing at it, so
+comparing the two would hold fire exactly when the shot is good. `_bears`
+compares `mount.aim` — where the barrel has actually slewed to — against
+`mount.want`, the unclamped demand recorded before the arc clamp, and widens the
+tolerance by the target's angular size, because the same error is a hit on
+something big and close and a miss on something small and far.
+
+The effect on a hull built around a broadside, ten seconds of every trigger held:
+
+| target bearing | mounts bearing | rounds fired |
+|-|-|-|
+| dead ahead | 3 of 13 | 11 |
+| 65° off the bow | 5 of 13 | 93 |
+| abeam | 5 of 13 | 90 |
+
+Which is the ship telling the truth about its own doctrine. Ammunition is now
+spent by pointing the hull the right way rather than by holding the trigger, and
+the gun that stays quiet is not broken — it is out of arc, which the mount list
+already says.
+
 #### The field encloses the hardware, not just the compartments
 
 `shield.radii` is derived, and it used to be derived from the compartment boxes
