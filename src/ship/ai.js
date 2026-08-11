@@ -30,6 +30,8 @@ const _qi = new THREE.Quaternion();
 /** Held across the whole gunnery call, so it cannot share with `_aimScan`. */
 const _aim = new THREE.Vector3();
 const _aimScan = new THREE.Vector3();
+/** Second scratch for the facing test; `_aimScan` holds the bearing. */
+const _aimFace = new THREE.Vector3();
 
 export const AI_STATE = {
   PATROL: 'PATROL',
@@ -52,35 +54,12 @@ const WEAPONS_FREE = ENGAGEMENT_RANGE * 1.5;
 const WITHDRAW_LIMIT = 22;
 
 /**
- * What each hull shoots AT, by the system it tries to break first.
+ * How often a shooter re-picks what it is aiming at.
  *
- * Every ship in the game used to lay on the target's centre of mass, which is
- * the one point every attacker agrees on — so a four-contact wave put its
- * entire output through whichever compartment happened to hold the centroid,
- * and on the cruisers and up that is the engineering deck. The player spent
- * every lull welding the same two hundred square metres while the rest of the
- * ship came through untouched, and the interiors this game is mostly ABOUT
- * never got hit.
- *
- * Splitting it by the SHOOTER's role rather than randomising is what makes the
- * spread mean something. A mixed wave now arrives with a mixed intent: the
- * pickets go for the drives because a picket's whole game is choosing the
- * range and it cannot let you leave, the frigates go for the guns, and the
- * heavies go for the plant. Damage lands all over the hull because the ships
- * shooting at you want different things, not because a random number moved it.
- *
- * Random scatter would also have spread the damage, and it is the wrong answer:
- * it makes every hit less meaningful rather than more, and it cannot be tested
- * for anything except its own variance. This is deterministic — given a bearing
- * and a target, a hull picks the same aim point every time.
+ * Long enough that a gun is not chasing a new point every frame — it lays,
+ * fires for a while, then reconsiders — and short enough that no one part of
+ * the target absorbs a whole engagement.
  */
-export const DOCTRINE = {
-  PICKET: 'PROPULSION',
-  'LINE FRIGATE': 'ORDNANCE',
-  'HEAVY CRUISER': 'POWER',
-  DREADNOUGHT: 'POWER',
-};
-/** How often a shooter re-picks its aim point as the geometry changes. */
 const AIM_REVIEW = 2.5;
 
 export class Pilot {
@@ -184,28 +163,58 @@ export class Pilot {
     return this.aimModule ? target.modulePoint(this.aimModule, out) : null;
   }
 
-  /** Nearest live module of this hull's preferred system, or nothing. */
+  /**
+   * Something live on the side of the target this ship can actually reach,
+   * chosen at random.
+   *
+   * Random on purpose, and it is a correction. Laying every gun on the centre of
+   * mass put a whole wave through one compartment — on the cruisers and up, the
+   * engineering deck. Choosing by the SHOOTER's role instead only moved the
+   * problem: every heavy in a wave wants the same system, so the plant became
+   * the new centroid and the player spent every lull welding the same two
+   * hundred square metres. Any rule that maps a shooter to a part of the target
+   * concentrates, because waves arrive with duplicate hull classes in them.
+   *
+   * So the only thing that genuinely spreads damage is not having a rule. Each
+   * ship picks afresh every `AIM_REVIEW` seconds, and a four-hull wave over a
+   * minute of firing walks its damage over the whole target rather than boring
+   * one hole through it. That is also the fairer arrangement: the player gets a
+   * repair problem spread across the ship instead of one compartment they can
+   * never get ahead of.
+   *
+   * "What is possible to it" is the near hemisphere. A gun cannot reach the far
+   * side of a two-hundred-metre hull, so aiming there means aiming through the
+   * ship — the rounds land on the near plating anyway and the choice is a lie.
+   * Two ships on opposite beams therefore still work on opposite flanks.
+   */
   _pickAim(target) {
-    const want = DOCTRINE[this.ship.hull.role];
-    if (!want) {
+    _aimScan.copy(this.ship.position).sub(target.position);
+    if (_aimScan.lengthSq() < 1e-6) {
       return null;
     }
-    let best = null;
-    let bestD = Infinity;
+    let count = 0;
+    let chosen = null;
     for (const m of target.sys.modules.values()) {
       // Conduits are wiring threaded through the whole ship rather than a place
       // on it, and they are already the thing a stray round cuts. Aim at the
       // machinery; severing the run that feeds it is a bonus, not a plan.
-      if (m.destroyed || m.kind === 'conduit' || m.def.sys !== want) {
+      if (m.destroyed || m.kind === 'conduit') {
         continue;
       }
-      const d = target.modulePoint(m.id, _aimScan).distanceToSquared(this.ship.position);
-      if (d < bestD) {
-        bestD = d;
-        best = m.id;
+      // Facing test in the target's own frame: is this module on the half of
+      // the hull turned toward the shooter?
+      target.modulePoint(m.id, _aimFace).sub(target.position);
+      if (_aimFace.dot(_aimScan) <= 0) {
+        continue;
+      }
+      // Reservoir sample, so one pass over the modules picks uniformly without
+      // building an array every 2.5 seconds for every ship in the wave.
+      count++;
+      if (Math.random() < 1 / count) {
+        chosen = m.id;
       }
     }
-    return best;
+    return chosen;
   }
 
   /** Sensor-gated target acquisition. Bad sensors mean a stale, noisy picture. */

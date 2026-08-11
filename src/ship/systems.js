@@ -178,19 +178,8 @@ function runService(m) {
 
 /** Atmosphere below this and unsuited crew start taking casualties. */
 export const ATMO_CRITICAL = 0.35;
-/** Fire needs at least this much oxygen to keep burning on the compartment's air. */
+/** Fire needs at least this much oxygen to keep burning. Below it, it is out. */
 const FIRE_MIN_ATMO = 0.14;
-/**
- * ...or this much spilled volatile, which brings its own oxidiser and does not
- * care that the bay is open to space. See `_tickFire`.
- *
- * The same figure `ignite` needs to start one, deliberately: anything with
- * enough on the deck to catch has enough to keep burning after the compartment
- * has vented, and any other pairing means fires that light and immediately go
- * out — which is exactly what used to happen, because the round that started
- * the fire was also the round that opened the bay.
- */
-const FIRE_MIN_SPILL = 0.08;
 
 // Fire tuning. Fire is a degrader that can become a finisher only by reaching
 // something that finishes you — a magazine or a fuel tank. On its own it eats
@@ -600,7 +589,18 @@ export class Systems {
       // And the ignition source arrives in the same instant. A hypervelocity
       // impact throws incandescent spall off the back face of the plate it just
       // crossed, into whatever has come out of the runs it cut on the way.
-      if (Math.random() < clamp01(rupture * 2)) {
+      //
+      // A CHANCE, and one that never reaches certainty. At `rupture * 2` this
+      // saturated: any hit taking about a quarter of a compartment's plate lit
+      // it with probability one, which was survivable while every attacker
+      // aimed at the centre of mass and stopped being so the moment they
+      // started picking compartments. Measured against three hulls
+      // concentrating properly, nine of a cruiser's fourteen compartments were
+      // alight inside ten seconds and twelve by the time it died — at which
+      // point fire is not an event, it is the ship's paint. A quarter is the
+      // ceiling: a compartment under sustained fire catches soon enough, and
+      // taking a couple of rounds usually costs you nothing but plate.
+      if (Math.random() < Math.min(0.25, rupture * 0.45)) {
         this.ignite(sectionId, 5 + 14 * s.spill);
       }
     }
@@ -1255,21 +1255,19 @@ export class Systems {
       if (s.fire <= 0) {
         continue;
       }
-      // Vacuum smothers a fire that was burning the compartment's air. It does
-      // NOT smother a fuel or coolant spill: propellant carries its own
-      // oxidiser and a hot coolant fire in an open bay keeps going until the
-      // volatile is gone, which is precisely the case a warship is full of.
+      // No air, no fire. Fire is an INTERNAL problem — it lives on the
+      // compartment's atmosphere, and a compartment open to space does not have
+      // one for long.
       //
-      // This is the rule that decides whether fire exists in this game at all.
-      // With the old one, every fire went out within seconds of starting,
-      // because the same round that started it also opened the compartment and
-      // the compartment vented — so the only fires that ever burned were in
-      // sealed rooms nothing had hit. A spill fire burns in vacuum at rather
-      // less than half intensity, which is enough to be a real problem and not
-      // enough to make venting a compartment pointless. Venting still puts one
-      // out immediately, because `ventSection` says so directly.
-      const airless = s.atmo < FIRE_MIN_ATMO;
-      if (airless && s.spill < FIRE_MIN_SPILL) {
+      // This cuts both ways and both are the point. A bay that is opened while
+      // it burns keeps burning for as long as there is pressure behind the
+      // hole, which is a real window on a big compartment with a small hole and
+      // is exactly when flame is visible from outside — it roars out of the
+      // wound and then gutters as the room empties. And a hull that has been
+      // comprehensively opened cannot burn at all, which is why fire is a
+      // problem of the ship's still-intact parts rather than a status the whole
+      // wreck acquires.
+      if (s.atmo < FIRE_MIN_ATMO) {
         s.fire = 0;
         this.events.push({ type: 'extinguish', section: s.id, reason: 'vacuum' });
         continue;
@@ -1280,8 +1278,7 @@ export class Systems {
         this.events.push({ type: 'extinguish', section: s.id, reason: 'fuel' });
         continue;
       }
-      const oxygen = Math.max(clamp01(s.atmo / 0.5), s.spill * 0.45);
-      const intensity = clamp01(s.fire / 3) * oxygen;
+      const intensity = clamp01(s.fire / 3) * clamp01(s.atmo / 0.5);
       s.atmo = clamp01(s.atmo - FIRE_ATMO_BURN * intensity * dt);
       s.spill = clamp01(s.spill - 0.06 * intensity * dt);
       s.temp = Math.min(900, s.temp + 120 * intensity * dt);
@@ -1330,18 +1327,28 @@ export class Systems {
   }
 
   /**
-   * Starts a fire where there is something to burn.
+   * Starts a fire where there is something to burn and air to burn it in.
    *
-   * Either air and a little spill, or enough spill that it does not need the
-   * air — the same rule `_tickFire` sustains it by. There must always be spill:
-   * a compartment full of nothing but atmosphere and steel does not catch.
+   * The test is the AIR, not the hole, and the difference matters both ways. A
+   * compartment holed a second ago still has its atmosphere and will catch — it
+   * has to, or fire barely exists in a real engagement, because the round that
+   * spills something flammable is usually the round that opens the bay. A
+   * compartment that has been open long enough to empty cannot catch at all,
+   * whatever is still on its deck, and that is the same rule arriving a few
+   * seconds later.
+   *
+   * So "open to space, no fire" holds in the state that lasts, and the seconds
+   * in between are the ones where flame is coming out of the wound.
+   *
+   * A compartment the crew have deliberately opened is never a candidate: they
+   * vented it to stop exactly this.
    */
   ignite(sectionId, seconds = 8) {
     const s = this.sections.get(sectionId);
     if (!s || s.spill < 0.08) {
       return false;
     }
-    if (s.atmo < FIRE_MIN_ATMO && s.spill < FIRE_MIN_SPILL) {
+    if (s.venting || s.atmo < FIRE_MIN_ATMO) {
       return false;
     }
     const fresh = s.fire <= 0;

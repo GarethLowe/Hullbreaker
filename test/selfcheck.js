@@ -14,7 +14,7 @@ import { Body, Autopilot, BURN_RATE } from '../src/ship/flight.js';
 import { WEAPONS, AMMO, MOUNTS } from '../src/weapons/defs.js';
 import { Ballistics } from '../src/weapons/ballistics.js';
 import { Ship, MOUNT_DEPRESSION } from '../src/ship/ship.js';
-import { Pilot, DOCTRINE } from '../src/ship/ai.js';
+import { Pilot } from '../src/ship/ai.js';
 import { Euler, Quaternion, Vector3, Color } from 'three';
 import { PARTS, MUZZLES, PIVOTS } from '../src/world/kit.js';
 import {
@@ -824,29 +824,58 @@ for (const [id, h] of Object.entries(HULLS)) {
     sys.get('fuel_A').store === 0);
 }
 
-// --- gunnery doctrine ----------------------------------------------------------
+// --- gunnery spreads its damage ------------------------------------------------
 // Every ship used to lay on the target's centre of mass, so a whole wave put its
 // output through one compartment — on the cruisers and up, the engineering deck.
-// Aim points are now chosen by the SHOOTER's role. Two ways that regresses
-// silently: a hull whose role is not in the table (it reverts to centre mass and
-// nobody notices), and a doctrine with nothing to shoot at on some hull (same
-// result, one matchup at a time). Neither shows up as an error at runtime.
+// Choosing by the SHOOTER's role only moved the pile: waves contain duplicate
+// hull classes, so every heavy in one wants the same system and the plant became
+// the new centroid. The property that matters is not "which part" but "not the
+// same part", and it is only testable as a distribution.
 {
-  const roles = new Set(Object.values(HULLS).map((h) => h.role));
-  for (const role of roles) {
-    ok(`${role} has a gunnery doctrine`, !!DOCTRINE[role],
-      `roles: ${[...roles].join(', ')}`);
+  const shooter = Object.create(Pilot.prototype);
+  const target = Object.create(Ship.prototype);
+  target.hull = HULLS.meridian;
+  target.body = { quat: new Quaternion(), pos: new Vector3() };
+  target.sys = new Systems(HULLS.meridian);
+  run(target.sys, 0.5);
+
+  // From dead ahead, well outside the hull.
+  shooter.ship = { position: new Vector3(0, 0, 4000), hull: HULLS.sabre };
+  const picks = new Map();
+  for (let i = 0; i < 4000; i++) {
+    const id = shooter._pickAim(target);
+    picks.set(id, (picks.get(id) || 0) + 1);
   }
-  // Conduits are excluded by _pickAim — wiring is threaded through the whole
-  // ship rather than being a place on it — so they must not count here either.
-  const carries = (hull, sys) => hull.modules.some(
-    (m) => m.kind !== 'conduit' && m.sys === sys,
-  );
-  for (const want of new Set(Object.values(DOCTRINE))) {
-    for (const [id, hull] of Object.entries(HULLS)) {
-      ok(`${id} has ${want} worth shooting at`, carries(hull, want));
-    }
+  ok('a shooter spreads its aim over many modules', picks.size > 12,
+    `${picks.size} distinct aim points`);
+  const worst = Math.max(...picks.values()) / 4000;
+  ok('...and does not favour any one of them', worst < 0.20,
+    `heaviest took ${(worst * 100).toFixed(0)}% of the picks`);
+  ok('...and never aims at wiring',
+    [...picks.keys()].every((id) => target.sys.get(id).kind !== 'conduit'));
+
+  // "What is possible to it": the near hemisphere. A gun cannot reach the far
+  // side of a 250 m hull, so two ships on opposite beams work opposite flanks.
+  const zOf = (id) => HULLS.meridian.sectionById[HULLS.meridian.moduleById[id].section].pos[2]
+    + HULLS.meridian.moduleById[id].pos[2] - HULLS.meridian.com[2];
+  ok('...and only at the side of the hull it is on',
+    [...picks.keys()].every((id) => zOf(id) > 0),
+    'picked something on the far side');
+
+  shooter.ship = { position: new Vector3(0, 0, -4000), hull: HULLS.sabre };
+  const aft = new Set();
+  for (let i = 0; i < 800; i++) {
+    aft.add(shooter._pickAim(target));
   }
+  ok('...so a ship on the other beam works the other end',
+    [...aft].every((id) => zOf(id) < 0), 'picked something on the far side');
+
+  // A destroyed module is not a thing to shoot at twice.
+  for (const m of target.sys.modules.values()) {
+    m.destroyed = true;
+  }
+  ok('a shooter with nothing left to aim at falls back to the hull',
+    shooter._pickAim(target) === null);
 }
 
 // --- a module's world position -------------------------------------------------
@@ -2579,30 +2608,31 @@ for (const [id, h] of Object.entries(HULLS)) {
   ok('...but not past the band it was given', ship._pdThreat(mount) === null);
 }
 
-// --- fire survives the round that started it --------------------------------
-// The one that made fire exist. A hit that opens a compartment is also the hit
-// that spills something flammable into it, and the compartment then vents — so
-// under the old rule (fire needs the compartment's air) every fire aboard went
-// out within seconds of starting, and the only fires that ever burned were in
-// sealed rooms nothing had hit. A spill carries its own oxidiser.
+// --- fire is an internal problem --------------------------------------------
+// It lives on the compartment's atmosphere. Open the plate and it goes out —
+// but not instantly, and the difference is the whole mechanic: a big
+// compartment with a small hole holds pressure for a while, which is the window
+// where flame is visible from outside, roaring out of the wound. Then it
+// gutters as the room empties.
 {
   const sys = fresh();
   run(sys, 0.5);
   const sec = sys.section('spine');
   sec.spill = 0.5;
-  // Sixty seconds of fuel, so the thirty this runs for cannot exhaust it —
-  // "the fire went out" has to mean the vacuum did it, not the clock.
-  ok('a spill fire lights', sys.ignite('spine', 60));
-  sys.punchHole('spine', 4);
-  run(sys, 30);
-  ok('...and the compartment vents', sec.atmo < 0.05, `atmo ${sec.atmo.toFixed(3)}`);
-  ok('...and it is still burning in the vacuum', sec.fire > 0,
-    `fire ${sec.fire.toFixed(1)} s, spill ${sec.spill.toFixed(2)}`);
-  // But burning the volatile off does put it out, and so does the crew opening
-  // the compartment to space on purpose.
-  sec.spill = 0;
+  // Sixty seconds of fuel, so nothing below can be the clock running out.
+  ok('a spill fire lights in a sealed compartment', sys.ignite('spine', 60));
+  sys.punchHole('spine', 0.55);
   run(sys, 3);
-  ok('once the spill is gone, so is the fire', sec.fire === 0);
+  ok('...and goes on burning while there is still pressure behind the hole',
+    sec.fire > 0 && sec.atmo > 0.2,
+    `fire ${sec.fire.toFixed(1)} s, atmo ${sec.atmo.toFixed(2)}`);
+  run(sys, 90);
+  ok('...and is out once the compartment has emptied', sec.fire === 0,
+    `atmo ${sec.atmo.toFixed(3)}`);
+  // And it cannot be restarted in a compartment that is open, however much is
+  // still on the deck.
+  sec.spill = 1;
+  ok('a compartment open to space will not catch at all', !sys.ignite('spine', 60));
 }
 {
   const sys = fresh();
@@ -2615,23 +2645,75 @@ for (const [id, h] of Object.entries(HULLS)) {
     sys.section('spine').fire === 0);
 }
 {
-  // Gunfire has to be able to START one, or none of the above ever happens.
+  // Gunfire has to be able to START one, or none of the above ever happens —
+  // and it must not start one every time, or fire stops being an event and
+  // becomes the ship's paint. Both ends are pinned, because the failure is
+  // one-sided in each direction and only the pair says where it should sit.
+  //
+  // Ignition used to reach certainty: any hit taking about a quarter of a
+  // compartment's plate lit it with probability one. That was survivable while
+  // every attacker aimed at the centre of mass, and stopped being so the moment
+  // hulls started picking compartments — nine of a cruiser's fourteen were
+  // alight inside ten seconds of three ships engaging it properly.
   const sys = fresh();
   run(sys, 0.5);
   const sec = sys.section('fwdbattery');
-  let lit = 0;
-  for (let trial = 0; trial < 40; trial++) {
-    sec.spill = 0;
-    sec.fire = 0;
-    sec.atmo = 1;
-    for (let i = 0; i < 10; i++) {
-      sys.damageSection('fwdbattery', sec.plateMax * 0.05, null, null);
+  const salvo = (hits, joulesFrac) => {
+    let lit = 0;
+    for (let trial = 0; trial < 60; trial++) {
+      sec.spill = 0;
+      sec.fire = 0;
+      sec.atmo = 1;
+      sec.plateHp = sec.plateMax;
+      sec.breached = false;
+      sec.breachSize = 0;
+      for (let i = 0; i < hits; i++) {
+        sys.damageSection('fwdbattery', sec.plateMax * joulesFrac, null, null);
+      }
+      if (sec.fire > 0) {
+        lit++;
+      }
     }
-    if (sec.fire > 0) {
-      lit++;
-    }
-  }
-  ok('shellfire starts fires', lit > 20, `${lit} of 40 salvos lit one`);
+    return lit;
+  };
+  // Plate still holding: the compartment is a sealed room being hammered, and
+  // that is where fires start.
+  const sustained = salvo(12, 0.05);
+  ok('sustained shellfire on a compartment that is still closed starts fires',
+    sustained > 15, `${sustained} of 60 sustained salvos lit one`);
+  const glancing = salvo(2, 0.02);
+  ok('...and a couple of light hits usually does not', glancing < 18,
+    `${glancing} of 60 light pairs lit one`);
+  // And the plate failing is its own answer to the fire — but on the
+  // compartment's own draining clock, not instantly. Straight after the salvo
+  // the bay is holed AND alight, because there is still air in it; that overlap
+  // is the window the flame is visible from outside. Once it has emptied, the
+  // fire is out and cannot be restarted.
+  salvo(30, 0.05);
+  ok('a compartment shot open can still be alight the moment it opens',
+    sec.breached, 'never breached');
+  run(sys, 120);
+  ok('...and the fire is out once it has emptied',
+    sec.fire === 0 && sec.atmo < 0.14,
+    `fire ${sec.fire.toFixed(1)}, atmo ${sec.atmo.toFixed(3)}`);
+  sec.spill = 1;
+  ok('...and will not catch again once it has emptied',
+    !sys.ignite('fwdbattery', 60));
+}
+{
+  // The other side of that: a bay holed a heartbeat ago still has its air, and
+  // has to be able to catch. The round that spills something flammable is
+  // usually the same round that opens the compartment, so refusing to ignite on
+  // `breached` alone removes fire from the game almost entirely — measured, a
+  // cruiser under three hulls for forty-five seconds never had more than two
+  // compartments alight and none at any ten-second sample.
+  const sys = fresh();
+  run(sys, 0.5);
+  const sec = sys.section('spine');
+  sec.spill = 0.5;
+  sys.punchHole('spine', 0.55);
+  ok('a compartment holed a moment ago still catches',
+    sec.breached && sec.atmo > 0.9 && sys.ignite('spine', 30));
 }
 
 // --- report -----------------------------------------------------------------

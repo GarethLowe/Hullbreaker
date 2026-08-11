@@ -1174,19 +1174,30 @@ loop — never "this is a big ship".
 ### Atmosphere, fire and the vent
 
 Compartments hold air. Breaches vent it at a rate set by hole size and volume.
-Fire needs spilled fuel and *either* oxygen or enough of that spill to bring its
-own oxidiser; it consumes both, heats the local coolant loop, burns through soft
-goods (conduits — so fire costs you a network) and spreads only into neighbours
-that have air and something to burn.
+Fire needs spilled fuel *and* oxygen, consumes both, heats the local coolant
+loop, burns through soft goods (conduits — so fire costs you a network) and
+spreads only into neighbours that have air and something to burn.
 
-That "or" is the whole reason fire exists in this game. Under the old rule a
-fire needed the compartment's air, and the round that starts a fire is the same
-round that opens the compartment — so every fire aboard went out within seconds
-and the only ones that ever burned were in sealed rooms nothing had hit. A hull
-could be shot to pieces without ever catching, which is exactly what it looked
-like from outside. Propellant and coolant carry their own oxidiser and keep
-burning in an open bay, at rather less than half intensity, until the volatile
-is gone.
+**Fire is an internal problem, not a space problem.** A compartment open to
+space does not burn — it has nothing to burn *with*. That is the rule, and the
+interesting part is that it arrives on the compartment's own draining clock
+rather than the instant the plate fails. A bay holed a second ago still has its
+atmosphere and catches perfectly well; a big compartment with a small hole holds
+pressure for a while, and those seconds are exactly when flame is visible from
+outside, roaring out of the wound. Then it gutters as the room empties, and once
+empty it will not catch again however much is still on its deck.
+
+Both halves are load-bearing. Testing the *hole* rather than the *air* removes
+fire from the game almost entirely, because the round that spills something
+flammable is usually the same round that opens the bay: measured, a cruiser
+under three hulls for forty-five seconds never had more than two compartments
+alight. Testing the air gives 0–3 burning at a time and eleven of fourteen
+compartments alight at some point over that fight — a recurring event rather
+than either a blanket status or nothing at all.
+
+It also means fire concentrates in the parts of a ship that are still intact,
+and a hull that has been comprehensively opened stops burning. Shooting a
+compartment open is itself an answer to the fire in it.
 
 Gunfire has to be able to start one, too. Nothing aboard is empty space —
 hydraulic runs, coolant returns and the compartment's own stores are threaded
@@ -1207,6 +1218,29 @@ being left, and keeps running until the crew weld it — thinning as the
 atmosphere goes, then continuing as sublimating coolant and outgassing stores.
 "The hole stopped smoking so it must be fixed" would be a lie the ship tells the
 player about its own condition.
+
+### Gunnery spreads its damage
+
+Every ship in the game laid on the target's centre of mass, which is the one
+point every attacker agrees on — so a four-contact wave put its entire output
+through whichever compartment held the centroid, and on the cruisers and up that
+is the engineering deck. The player spent every lull welding the same two
+hundred square metres while the rest of the ship came through untouched, and the
+interiors this game is mostly *about* never got hit.
+
+Choosing an aim point by the shooter's role fixes that on paper and not in
+practice: waves contain duplicate hull classes, so every heavy in one wants the
+same system and the plant simply becomes the new centroid. **Any rule that maps
+a shooter to a part of the target concentrates.** So there is no rule — each
+ship picks a live module at random every 2.5 seconds, from the hemisphere of the
+target actually turned toward it, because a gun cannot reach the far side of a
+250 m hull and pretending otherwise is a lie about where the rounds land.
+
+Measured over three hulls engaging a cruiser for forty-five seconds: every
+compartment damaged, and the worst-hit one took 7% of total plate loss. Two
+ships on opposite beams still work opposite flanks. It is also the fairer
+arrangement — a repair problem spread across the ship, rather than one
+compartment the damage-control parties can never get ahead of.
 
 ### Crew
 
