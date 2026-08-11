@@ -28,6 +28,7 @@
 // -----------------------------------------------------------------------------
 import { ATMO_CRITICAL } from './systems.js';
 import { clamp01 } from '../core/mathx.js';
+import { captureState, captureList, applyList } from '../core/state.js';
 
 /** Seconds to cross one compartment of a capital hull under ideal conditions. */
 const TRAVERSE_TIME = 5.5;
@@ -197,6 +198,43 @@ export class Crew {
   /** Hands still alive. */
   get headcount() {
     return Math.round(this.census.alive);
+  }
+
+  // -- save and restore ------------------------------------------------------
+
+  /**
+   * The parties: how many hands each has left, where they are and where they
+   * were going. The census is not in it — `tick` recounts it from the parties
+   * every step, and a stored copy could only ever be a way to disagree with
+   * them.
+   */
+  snapshot() {
+    return {
+      parties: this.parties.map((q) => ({
+        ...captureState(q),
+        // The one nested object in the simulation's state, and therefore the
+        // one thing the generic capture cannot see — it takes primitives and
+        // leaves object references alone, because object references are the
+        // shared authored tables. A party's current job is neither: it is
+        // `{ kind, target }`, two strings, and a party restored without it goes
+        // back to work on whatever it was doing before the snapshot.
+        task: q.task ? { ...q.task } : null,
+      })),
+    };
+  }
+
+  restore(snap) {
+    if (!snap) {
+      return;
+    }
+    applyList(this.parties, snap.parties);
+    // Copied out again rather than shared, so restoring twice cannot hand two
+    // ships the same task object.
+    this.parties.forEach((q, i) => {
+      const t = snap.parties[i] && snap.parties[i].task;
+      q.task = t ? { ...t } : null;
+    });
+    this.events.length = 0;
   }
 
   /**

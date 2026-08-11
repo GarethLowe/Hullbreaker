@@ -88,6 +88,34 @@ export class Body {
     this.com = new THREE.Vector3(...hull.com);
   }
 
+  /**
+   * Where the hull is and what it is doing. Everything else on a Body is mass
+   * properties read straight off the hull tables and identical on any ship of
+   * the class, so it is not state and does not travel.
+   */
+  snapshot() {
+    return {
+      pos: this.pos.toArray(),
+      vel: this.vel.toArray(),
+      quat: this.quat.toArray(),
+      omega: this.omega.toArray(),
+    };
+  }
+
+  restore(snap) {
+    if (!snap) {
+      return;
+    }
+    this.pos.fromArray(snap.pos);
+    this.vel.fromArray(snap.vel);
+    this.quat.fromArray(snap.quat);
+    this.omega.fromArray(snap.omega);
+    // Accumulators, not state: whatever was pushing on the hull belongs to the
+    // tick it was pushing in.
+    this.force.set(0, 0, 0);
+    this.torque.set(0, 0, 0);
+  }
+
   addForce(worldVec) {
     this.force.add(worldVec);
   }

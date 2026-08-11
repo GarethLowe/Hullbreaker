@@ -91,6 +91,8 @@ class Game {
     this.pilots = new Map();
     this.player = null;
     this.wave = 0;
+    /** The player's ship as the current wave began; see `retryWave`. */
+    this.waveStart = null;
     this.waveTimer = 3;
     this.kills = 0;
     this.paused = false;
@@ -141,6 +143,7 @@ class Game {
     });
 
     window.addEventListener('resize', () => this._onResize());
+    window.addEventListener('keydown', (e) => this._onOverKey(e));
     // Listen on the window, not the canvas. The splash and pause cards are
     // full-screen overlays stacked above the canvas, so a canvas-level handler
     // never sees the click that is supposed to dismiss them — which made the
@@ -216,9 +219,22 @@ class Game {
    * what a coolant loop is for. Heavies now arrive as a single named problem
    * before they arrive as a group.
    */
-  _spawnWave() {
-    this.wave++;
-    const w = this.wave;
+  /**
+   * Begin wave `w`, from whatever state the player's ship is in right now.
+   *
+   * The snapshot taken here is what `retryWave` puts you back into, and taking
+   * it at the top of the wave rather than at the moment of death is the whole
+   * point: a retry should hand you the ship you actually started the wave with,
+   * damage and spent lockers and all, not a pristine one.
+   */
+  startWave(w) {
+    this.wave = w;
+    this.waveStart = this.player && !this.player.ship.disposed
+      ? this.player.ship.snapshot() : null;
+    this._deployWave(w);
+  }
+
+  _deployWave(w) {
     const n = Math.min(4, 1 + Math.floor((w - 1) / 3));
     const pool = w <= 2 ? ['sabre']
       : (w <= 4 ? ['sabre', 'sabre', 'halberd']
@@ -244,6 +260,107 @@ class Game {
       });
     }
     this.hud.warn(`WAVE ${this.wave} — ${n} CONTACT${n > 1 ? 'S' : ''}`);
+  }
+
+  // -- run control -------------------------------------------------------------
+
+  /**
+   * Clear the sky. Every ship goes, along with everything in flight and every
+   * effect still burning, so a restarted wave begins in an empty engagement
+   * rather than inside the wreckage of the last attempt.
+   */
+  /**
+   * Empty the sky and hand back what should outlive the attempt.
+   *
+   * The wheel bindings are the only thing: which weapons are on the two mouse
+   * buttons is a preference rather than run state, and losing it on every retry
+   * would be its own small tax. It has to be read before the teardown, because
+   * the teardown is what disposes the ship holding it.
+   */
+  _clearWorld() {
+    const bindings = this.player
+      ? { primary: this.player.primary, secondary: this.player.secondary }
+      : null;
+    for (const s of [...this.ships]) {
+      this.ecs.destroy(s.entity);
+    }
+    this.ships.length = 0;
+    this.pilots.clear();
+    this.ballistics.clear();
+    this.fx.clear();
+    this.targeting.setTarget(null);
+    this.targetPanel.setShip(null);
+    this.player = null;
+    return bindings;
+  }
+
+  /**
+   * Put a player's ship back in the world and hand the camera to it. `snap` is
+   * a `Ship.snapshot()` to restore into it, or null for a ship off the slip.
+   */
+  _deployPlayer(snap, bindings) {
+    const ship = this._spawnPlayer(snap ? snap.hullId : 'meridian');
+    if (snap) {
+      ship.restore(snap);
+    }
+    if (bindings) {
+      const n = this.player.ship.weaponGroups.length;
+      this.player.primary = Math.min(bindings.primary, Math.max(n - 1, 0));
+      this.player.secondary = Math.min(bindings.secondary, Math.max(n - 1, 0));
+    }
+    return ship;
+  }
+
+  _resumePlaying() {
+    this.over = false;
+    this.waveTimer = 45;
+    document.getElementById('gameover').classList.add('hidden');
+    this.input.requestLock();
+  }
+
+  /**
+   * Fly this wave again with the ship you brought to it.
+   *
+   * Without this, losing at wave six costs the five waves it took to get there
+   * and a page reload — the card used to say "Reload the page to fly again" and
+   * meant it. The climb is the interesting part exactly once.
+   */
+  retryWave() {
+    const snap = this.waveStart;
+    const bindings = this._clearWorld();
+    this._deployPlayer(snap, bindings);
+    this._resumePlaying();
+    this._deployWave(this.wave);
+    this.hud.warn(`WAVE ${this.wave} — SECOND ATTEMPT`);
+  }
+
+  /** From the top, with a ship off the slip. */
+  newRun() {
+    const bindings = this._clearWorld();
+    this.kills = 0;
+    this._deployPlayer(null, bindings);
+    this._resumePlaying();
+    this.startWave(1);
+  }
+
+  /**
+   * Skip to the next wave without fighting this one.
+   *
+   * A development convenience and it is not pretending otherwise — reaching
+   * wave seven to look at what happens there should not cost six waves of
+   * fighting first. It scores nothing, and it takes the same wave-start
+   * snapshot as arriving there properly would, so a skipped-to wave is still
+   * retryable.
+   */
+  skipWave() {
+    for (const s of [...this.ships]) {
+      if (!s.isPlayer) {
+        this.ecs.destroy(s.entity);
+      }
+    }
+    this.ballistics.clear();
+    this.startWave(this.wave + 1);
+    this.hud.nudge(`SKIPPED TO WAVE ${this.wave}`, 1.6);
   }
 
   // -- system schedule -------------------------------------------------------
@@ -440,6 +557,9 @@ class Game {
       this.over = true;
       document.getElementById('gameoverStats').textContent =
         `WAVE ${this.wave}  ·  ${this.kills} KILLS`;
+      document.getElementById('gameoverRetry').textContent = this.waveStart
+        ? `[R]  RETRY WAVE ${this.wave}`
+        : '[R]  RETRY  —  no snapshot, starts a new run';
       document.getElementById('gameover').classList.remove('hidden');
       this.input.exitLock();
     }
@@ -460,7 +580,7 @@ class Game {
           const hands = this.player.ship.resupply();
           this.hud.warn(hands > 0 ? `RESUPPLIED — ${hands} HANDS ABOARD` : 'RESUPPLIED');
         }
-        this._spawnWave();
+        this.startWave(this.wave + 1);
       }
     }
   }
@@ -703,8 +823,36 @@ class Game {
       });
       this.hud.nudge('TEST CONTACT DEPLOYED', 1.4);
     }
+    if (input.pressed('KeyK')) {
+      this.skipWave();
+    }
     if (input.pressed('Escape')) {
       this.input.exitLock();
+    }
+  }
+
+  /**
+   * The only keys that work once the ship is lost.
+   *
+   * Handled straight off the keydown rather than polled in the frame loop, and
+   * that is not a style choice: re-entering the game calls `requestPointerLock`,
+   * which the browser only grants inside a user gesture. Polled from a frame
+   * the lock is refused, `onLockChange` sees an unlocked-but-playing game and
+   * immediately raises the pause card — so retrying would drop you straight
+   * into a second overlay.
+   */
+  _onOverKey(e) {
+    if (!this.over) {
+      return;
+    }
+    if (e.code === 'KeyR') {
+      if (this.waveStart) {
+        this.retryWave();
+      } else {
+        this.newRun();
+      }
+    } else if (e.code === 'KeyN') {
+      this.newRun();
     }
   }
 

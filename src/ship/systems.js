@@ -27,6 +27,9 @@
 // -----------------------------------------------------------------------------
 import { NETS, FACETS, MATERIALS, HOIST_FILL_SECONDS } from './hulls.js';
 import { clamp, clamp01, lerp } from '../core/mathx.js';
+import {
+  captureState, applyState, captureMap, applyMap, captureRecord, applyRecord,
+} from '../core/state.js';
 
 export const LEVEL = { OK: 'ok', WARN: 'warn', CRIT: 'crit', DEAD: 'dead' };
 const WARN_AT = 0.85;
@@ -990,6 +993,44 @@ export class Systems {
       }
     }
     return Math.round(n);
+  }
+
+  // -- save and restore ------------------------------------------------------
+
+  /**
+   * Everything the last few minutes did to this ship, as plain data.
+   *
+   * The networks are not in it and must not be: `online` is derived from the
+   * conduits' health by `_tickNetworks` at the top of every tick, so restoring
+   * a stale copy would be overwritten a frame later at best and would disagree
+   * with the conduits at worst. The same goes for the census. Anything the sim
+   * recomputes from first principles is left to recompute.
+   */
+  snapshot() {
+    return {
+      self: captureState(this),
+      sections: captureMap(this.sections),
+      modules: captureMap(this.modules),
+      loops: captureMap(this.loops),
+      shield: captureState(this.shield),
+      facets: captureRecord(this.shield.facets),
+    };
+  }
+
+  restore(snap) {
+    if (!snap) {
+      return;
+    }
+    applyState(this, snap.self);
+    applyMap(this.sections, snap.sections);
+    applyMap(this.modules, snap.modules);
+    applyMap(this.loops, snap.loops);
+    applyState(this.shield, snap.shield);
+    applyRecord(this.shield.facets, snap.facets);
+    // Events are a queue between the sim and the renderer, not state. Anything
+    // still in it belongs to the run that just ended.
+    this.events.length = 0;
+    this._tickNetworks();
   }
 
   // -- per-tick simulation ---------------------------------------------------

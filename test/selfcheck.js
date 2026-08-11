@@ -2716,6 +2716,133 @@ for (const [id, h] of Object.entries(HULLS)) {
     sec.breached && sec.atmo > 0.9 && sys.ignite('spine', 30));
 }
 
+// --- a wave can be retried ---------------------------------------------------
+// Losing at wave six used to cost the five waves it took to get there and a page
+// reload. Retry restores the ship as it was when the wave began, which is only
+// worth anything if the restore is EXACT — a snapshot that silently drops a
+// field is a retry that quietly heals you, and the more fields it drops the
+// easier the game gets in a way nobody would think to look for.
+//
+// So this compares a full structural dump rather than a list of fields anybody
+// has to remember to update. Add a field to a compartment, a module, a loop, a
+// facet or a party and it is covered the moment it exists.
+{
+  // References that are shared authored tables rather than state. Everything
+  // else on a state object has to survive a round trip.
+  const SHARED = new Set(['def', 'div']);
+  const values = (o) => {
+    const out = {};
+    for (const k of Object.keys(o)) {
+      const v = o[k];
+      if (SHARED.has(k)) {
+        continue;
+      }
+      if (v === null || typeof v !== 'object') {
+        out[k] = v;
+      } else {
+        out[k] = JSON.stringify(v);   // arrays, and the one `task` object
+      }
+    }
+    return out;
+  };
+  const stateObjects = (sys, crew) => [
+    ...sys.sections.values(), ...sys.modules.values(), ...sys.loops.values(),
+    ...Object.values(sys.shield.facets), ...crew.parties,
+  ];
+  const dump = (sys, crew) => JSON.stringify({
+    objects: stateObjects(sys, crew).map(values),
+    shield: { base: sys.shield.base, up: sys.shield.up },
+    power: { capStore: sys.capStore, capMax: sys.capMax, brownout: sys.brownout,
+      busQuality: sys.busQuality, integrity: sys.integrity },
+  });
+
+  const sys = fresh();
+  const crew = new Crew(HULLS.meridian, sys);
+  run(sys, 2, crew);
+
+  // Rough it up: plate off, compartments open, a fire, a spill, spent rounds,
+  // drained fuel, a wrecked module, casualties, a flat capacitor.
+  sys.damageSection('fwdbattery', sys.section('fwdbattery').plateMax * 0.8, null, null);
+  sys.punchHole('bowarray', 3.2);
+  sys.section('spine').spill = 0.6;
+  sys.ignite('spine', 20);
+  sys.damageModule('rad_L', 9e6, null, null);
+  sys.get('mag_main').rounds *= 0.4;
+  for (const m of sys.modules.values()) {
+    if (m.kind === 'fuel') {
+      m.store = 37;
+    }
+  }
+  sys.capStore *= 0.3;
+  sys.damageShield('fore', 4e7, 1e-3);
+  crew.killIn('engineering', 2);
+  run(sys, 5, crew);
+
+  const before = dump(sys, crew);
+  const snap = { sys: sys.snapshot(), crew: crew.snapshot() };
+
+  // Carry on being shot, so a restore that does nothing cannot pass.
+  sys.damageSection('drivebay', sys.section('drivebay').plateMax * 0.9, null, null);
+  sys.punchHole('coredeck', 6);
+  crew.killIn('spine', 3);
+  run(sys, 20, crew);
+  ok('the ship really did change after the snapshot', dump(sys, crew) !== before);
+
+  sys.restore(snap.sys);
+  crew.restore(snap.crew);
+  ok('a restored ship is exactly the ship that was snapshotted',
+    dump(sys, crew) === before,
+    'state differs — a field is missing from captureState or the state objects nested');
+
+  // Restoring twice must give the same answer: nothing may share mutable
+  // structure with the snapshot.
+  run(sys, 10, crew);
+  sys.restore(snap.sys);
+  crew.restore(snap.crew);
+  ok('...and can be restored more than once', dump(sys, crew) === before);
+
+  // And it has to be a live ship afterwards, not a frozen dump — the networks
+  // and the census are derived, so they must come back on their own.
+  run(sys, 3, crew);
+  ok('a restored ship keeps running', sys.online.power.size > 0 && crew.headcount > 0,
+    `nodes ${sys.online.power.size}, hands ${crew.headcount}`);
+
+  // The documented limitation of the generic capture, made into a tripwire.
+  // `captureState` takes primitives and primitive arrays and leaves object
+  // references alone, because object references are the shared authored tables.
+  // A NEW nested object on a state object would therefore be dropped silently.
+  // There is exactly one today — a party's `task` — and Crew handles it by
+  // hand. A second one has to be a decision somebody makes on purpose.
+  const nested = [];
+  for (const o of stateObjects(sys, crew)) {
+    for (const k of Object.keys(o)) {
+      if (SHARED.has(k) || k === 'task') {
+        continue;
+      }
+      const v = o[k];
+      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+        nested.push(`${o.id || o.role}.${k}`);
+      }
+    }
+  }
+  ok('no state object has grown a nested object the capture cannot see',
+    nested.length === 0,
+    `${nested.join(', ')} — handle it in snapshot/restore like Crew does 'task'`);
+}
+{
+  // The wave-start snapshot is the ship you brought to the wave, so a retry
+  // must not hand back a pristine one.
+  const sys = fresh();
+  run(sys, 1);
+  sys.damageSection('spine', sys.section('spine').plateMax * 0.7, null, null);
+  const snap = sys.snapshot();
+  const hurt = sys.section('spine').plateHp;
+  run(sys, 1);
+  sys.restore(snap);
+  ok('a retry gives back a damaged ship, not a new one',
+    sys.section('spine').plateHp === hurt && hurt < sys.section('spine').plateMax);
+}
+
 // --- report -----------------------------------------------------------------
 if (failures.length === 0) {
   console.log(`selfcheck: ${passed} assertions passed`);

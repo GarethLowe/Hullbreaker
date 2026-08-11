@@ -93,7 +93,11 @@ so there are no binary assets in the repository.
 | `V` | cockpit / chase view |
 | `N` | time dilation — 1x / 0.35x / 0.12x |
 | `G` | deploy a test contact |
+| `K` | skip to the next wave |
 | `M` | mute |
+| | *once you have been killed* |
+| `R` | retry the wave, in the ship you brought to it |
+| `N` | new run |
 | `Esc` | pause |
 
 Throttle is a **held demand**, not Elite's persistent setting: speed builds while
@@ -1219,6 +1223,38 @@ atmosphere goes, then continuing as sublimating coolant and outgassing stores.
 "The hole stopped smoking so it must be fixed" would be a lie the ship tells the
 player about its own condition.
 
+### Retrying a wave
+
+The card used to say "Reload the page to fly again", and meant it: losing at
+wave six cost the five waves it took to get there. The climb is the interesting
+part exactly once.
+
+`R` refights the wave **in the ship you brought to it** — the plate you had
+left, the compartments that were already open, the rounds you had already spent,
+the hands you had already lost. Not a fresh hull, which would make dying free,
+and not the wreck you died in, which would make the retry unwinnable. The
+snapshot is taken when the wave is deployed, so it includes the between-wave
+repair and resupply and nothing that happened afterwards.
+
+That only means anything if the restore is *exact*, and the failure mode is
+nasty: a snapshot that silently drops a field is a retry that quietly heals you,
+and the more it drops the easier the game gets in a way nobody would think to
+look for. So the capture is generic — it walks whatever is on a state object
+rather than naming fields in a second file that rots. `selfcheck` wrecks a
+cruiser, snapshots it, wrecks it further, restores, and compares a full
+structural dump; deleting a single field from the capture fails it by name.
+
+The one thing deliberately not restored is the *cosmetics*. A restored ship is
+built fresh, so it wears clean paint over an honestly wrecked interior — the
+alternative is serialising a decal ring so the outside of the hull agrees with a
+history that no longer happened. Venting and fire still show, because those are
+read from the live compartment state rather than from the damage log.
+
+`K` skips to the next wave. It is a development convenience and does not pretend
+otherwise — reaching wave seven to see what happens there should not cost six
+waves of fighting first. It scores nothing, and it takes the same wave-start
+snapshot, so a skipped-to wave is still retryable.
+
 ### Gunnery spreads its damage
 
 Every ship in the game laid on the target's centre of mass, which is the one
@@ -1357,7 +1393,7 @@ subsystem rather than the hull.
 npm test
 ```
 
-717 assertions, no framework, about a second. They drive the real `Systems`,
+861 assertions, no framework, about a second. They drive the real `Systems`,
 `Crew` and `Ballistics` classes with no renderer attached and cover the things
 that are expensive to notice by flying around: network redundancy on each hull,
 load-shed ordering, the shield coupling curve and both of its failure modes, the

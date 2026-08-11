@@ -1020,6 +1020,60 @@ export class Ship {
     }
   }
 
+  // -- save and restore --------------------------------------------------------
+
+  /**
+   * The whole ship as plain data: where it is, what is broken, what is left in
+   * the lockers and who is still alive.
+   *
+   * Composed rather than centralised — the body, the systems and the crew each
+   * capture themselves, because each of them is the only thing that knows what
+   * its own state is. A snapshot taken here has no idea a coolant loop has a
+   * temperature, and it should not have to.
+   *
+   * Nothing about the RENDERING is in it. Decals, scorched plating and the
+   * penetration traces are a record of damage rather than the damage itself,
+   * and a restored ship is built fresh, so it wears clean paint over an
+   * honestly wrecked interior. That is a deliberate trade: the alternative is
+   * serialising a decal ring to make the outside of the hull agree with a
+   * history that no longer happened.
+   */
+  snapshot() {
+    return {
+      hullId: this.hull.id,
+      body: this.body.snapshot(),
+      sys: this.sys.snapshot(),
+      crew: this.crew.snapshot(),
+      ammo: this.ammo,
+      dead: this.dead,
+      derelict: this.derelict,
+      derelictT: this.derelictT,
+      adriftT: this.adriftT || 0,
+      scored: this.scored,
+    };
+  }
+
+  restore(snap) {
+    if (!snap) {
+      return;
+    }
+    this.body.restore(snap.body);
+    this.sys.restore(snap.sys);
+    this.crew.restore(snap.crew);
+    this.ammo = snap.ammo;
+    this.dead = snap.dead;
+    this.deadT = 0;
+    this.derelict = snap.derelict;
+    this.derelictT = snap.derelictT;
+    this.adriftT = snap.adriftT;
+    this.scored = snap.scored;
+    this.jolt = 0;
+    this.holes.length = 0;
+    this.xray.length = 0;
+    this._updateSignature();
+    this._syncVisual(0);
+  }
+
   /**
    * How bright this hull is in the infrared, in units that only have to be
    * comparable between ships. Read by seeker heads; see `Ballistics._acquire`.
