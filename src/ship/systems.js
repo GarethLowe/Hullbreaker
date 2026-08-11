@@ -41,8 +41,28 @@ export const AMBIENT_C = 18;
 export const DERATE_TEMP_C = 95;
 /** Above this it trips offline until it cools back below DERATE. */
 export const TRIP_TEMP_C = 155;
-/** Junction temperature at which the ship computer latches off permanently. */
+/**
+ * Junction temperature at which a ship computer cooks itself off the bus.
+ *
+ * It used to latch PERMANENTLY, ship-wide, and that was two bugs wearing one
+ * coat. A boiled coolant loop took the helm for the rest of the run with no
+ * recovery of any kind — the module sat at a hundred per cent health and ambient
+ * temperature with the flag still set, so "repair the computer" was advice that
+ * could not be followed, and later waves were unflyable. And because the flag
+ * was on the SHIP, cooking the bridge machine also disabled a perfectly healthy
+ * auxiliary two decks away, which is the opposite of why a second one is fitted.
+ *
+ * It is per-module now, and it is real damage rather than a flag: a computer
+ * that cooks its junctions is left at `COMPUTER_COOKED_HP` of rated health, so
+ * getting the helm back is a damage-control job like any other. The weight the
+ * permanent latch was reaching for is still there — losing the helm mid-fight
+ * is severe, and on a hull with one computer it is very severe — but it is a
+ * problem the crew can be sent at instead of the end of the run.
+ */
 const COMPUTER_LATCH_C = 128;
+/** Health a cooked computer is left at, and what it must be nursed back past. */
+const COMPUTER_COOKED_HP = 0.12;
+const COMPUTER_REBOOT_HP = 0.55;
 
 /**
  * How sound a coolant run has to be before its loop will hold pressure. The
@@ -317,6 +337,11 @@ export class Systems {
         temp: AMBIENT_C,
         /** Latched thermal trip; clears when the module cools back down. */
         tripped: false,
+        /**
+         * A computer that has cooked its junctions. Clears when it is cool AND
+         * has been mended past COMPUTER_REBOOT_HP; see `_tickThermal`.
+         */
+        latched: false,
         /** Shed by the power manager this tick. */
         shed: false,
         /** Live electrical draw (MW). Usually the authored figure, but the
@@ -448,7 +473,6 @@ export class Systems {
       dissipation: 0,
     };
 
-    this.computerLatched = false;
     this.integrity = 1;
     this.destroyed = false;
     /** Set once the hull can no longer be considered a fighting ship. */
@@ -1609,9 +1633,17 @@ export class Systems {
       if (m.kind !== 'computer' || m.destroyed) {
         continue;
       }
-      if (m.temp >= COMPUTER_LATCH_C && !this.computerLatched) {
-        this.computerLatched = true;
+      if (m.temp >= COMPUTER_LATCH_C && !m.latched) {
+        m.latched = true;
+        // It really did cook. Leaving health alone and setting a flag is what
+        // made this unrecoverable: there was nothing for the crew to mend.
+        m.hp = Math.min(m.hp, m.maxHp * COMPUTER_COOKED_HP);
         this.events.push({ type: 'computerThermal', module: m });
+      } else if (m.latched && m.temp < DERATE_TEMP_C
+                 && m.hp > m.maxHp * COMPUTER_REBOOT_HP) {
+        // Cool, and mended far enough to trust with the helm again.
+        m.latched = false;
+        this.events.push({ type: 'computerReset', module: m });
       }
     }
   }
@@ -1872,17 +1904,37 @@ export class Systems {
 
   // -- derived capability read-outs ------------------------------------------
 
-  /** Is there a working computer with power and a helm data link? */
+  /**
+   * Is there a working computer with power and a helm data link?
+   *
+   * ANY of them. The check is per-module because the latch is: a ship that
+   * carries an auxiliary carries it precisely so that cooking or losing the
+   * bridge machine is survivable, and a ship-wide flag threw that away.
+   */
   get flightComputer() {
-    if (this.computerLatched) {
+    if (!this.online.data.has('d.helm')) {
       return false;
     }
     for (const m of this.modules.values()) {
-      if (m.kind === 'computer' && m.eff > 0.15 && this.online.data.has('d.helm')) {
+      if (m.kind === 'computer' && !m.latched && !m.destroyed && m.eff > 0.15) {
         return true;
       }
     }
     return false;
+  }
+
+  /** True when every computer aboard is cooked. For the read-outs. */
+  get computerLatched() {
+    let any = false;
+    for (const m of this.modules.values()) {
+      if (m.kind === 'computer' && !m.destroyed) {
+        any = true;
+        if (!m.latched) {
+          return false;
+        }
+      }
+    }
+    return any;
   }
 
   /**

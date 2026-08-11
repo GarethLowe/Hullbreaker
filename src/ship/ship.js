@@ -1600,7 +1600,12 @@ export class Ship {
           break;
         case 'computerThermal':
           if (this.isPlayer) {
-            this.game.hud.warn('COMPUTER THERMAL SHUTDOWN');
+            this.game.hud.warn(`${e.module.label} COOKED — DAMAGE CONTROL`);
+          }
+          break;
+        case 'computerReset':
+          if (this.isPlayer) {
+            this.game.hud.warn(`${e.module.label} REBOOTED`);
           }
           break;
         case 'trip':

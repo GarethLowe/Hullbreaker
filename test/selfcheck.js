@@ -2716,6 +2716,67 @@ for (const [id, h] of Object.entries(HULLS)) {
     sec.breached && sec.atmo > 0.9 && sys.ignite('spine', 30));
 }
 
+// --- losing the helm is survivable -------------------------------------------
+// The computer used to latch off PERMANENTLY and ship-wide when it cooked, and
+// that was two faults wearing one coat. There was no recovery of any kind: the
+// module sat at full health and ambient temperature with the flag still set, so
+// "repair the computer" was advice that could not be followed and later waves
+// were unflyable. And a ship-wide flag meant cooking the bridge machine also
+// disabled a healthy auxiliary, which is the opposite of why one is fitted.
+{
+  const computers = (sys) => [...sys.modules.values()].filter((m) => m.kind === 'computer');
+
+  // Cooked, on a hull with only one.
+  {
+    const sys = new Systems(HULLS.sabre);
+    const crew = new Crew(HULLS.sabre, sys);
+    run(sys, 1, crew);
+    ok('the helm starts up', sys.flightComputer);
+    const c = computers(sys)[0];
+    c.temp = 400;
+    run(sys, 2, crew);
+    ok('cooking the computer takes the helm', !sys.flightComputer);
+    ok('...and leaves real damage for the crew to find', c.hp < c.maxHp * 0.2,
+      `hp ${(100 * c.hp / c.maxHp).toFixed(0)}%`);
+    run(sys, 60, crew);
+    ok('...which damage control can actually put right', sys.flightComputer,
+      `hp ${(100 * c.hp / c.maxHp).toFixed(0)}%, temp ${c.temp.toFixed(0)}, `
+      + `latched ${c.latched}`);
+  }
+
+  // Shot to pieces rather than cooked — the same must hold.
+  {
+    const sys = new Systems(HULLS.sabre);
+    const crew = new Crew(HULLS.sabre, sys);
+    run(sys, 1, crew);
+    const c = computers(sys)[0];
+    sys.damageModule(c.id, c.maxHp * 3, null, null);
+    ok('a destroyed computer takes the helm', c.destroyed && !sys.flightComputer);
+    run(sys, 90, crew);
+    ok('...and the crew rebuild it', !c.destroyed && sys.flightComputer);
+  }
+
+  // And the whole point of a second one.
+  {
+    const sys = new Systems(HULLS.meridian);
+    const crew = new Crew(HULLS.meridian, sys);
+    run(sys, 1, crew);
+    const cs = computers(sys);
+    ok('a cruiser carries an auxiliary computer', cs.length > 1);
+    cs[0].temp = 400;
+    run(sys, 2, crew);
+    ok('cooking one leaves the helm on the other', sys.flightComputer,
+      'a ship-wide latch would have taken both');
+    for (const c of cs) {
+      c.temp = 400;
+    }
+    run(sys, 2, crew);
+    ok('...and cooking every one of them does take the helm', !sys.flightComputer);
+    run(sys, 90, crew);
+    ok('...still recoverable', sys.flightComputer);
+  }
+}
+
 // --- a wave can be retried ---------------------------------------------------
 // Losing at wave six used to cost the five waves it took to get there and a page
 // reload. Retry restores the ship as it was when the wave began, which is only

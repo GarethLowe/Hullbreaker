@@ -1158,8 +1158,22 @@ Measured cascade — cutting one HALYARD coolant pipe:
 ```
 +0s   reactor  84 °C   eff 1.00   supply 24.0 MW
 +5s   reactor 145 °C   eff 0.33   supply  7.9 MW   computer 101 °C
-+15s  reactor 158 °C   eff 0.20   supply  4.8 MW   computer 118 °C  (latches at 128)
++15s  reactor 158 °C   eff 0.20   supply  4.8 MW   computer 118 °C  (cooks at 128)
 ```
+
+A computer that reaches 128 °C cooks its junctions and drops off the bus,
+taking the helm with it if it was the only one. That is per-machine and it is
+real damage rather than a flag — it is left at about a tenth of rated health, so
+getting the helm back is a damage-control job like any other, and a hull that
+carries an auxiliary keeps flying on it in the meantime.
+
+It used to latch *permanently* and *ship-wide*, which was two faults wearing one
+coat. There was no recovery of any kind: the module sat at full health and
+ambient temperature with the flag still set, so "repair the computer" was advice
+that could not be followed and a boiled loop made the rest of the run unflyable.
+And because the flag was on the ship rather than the machine, cooking the bridge
+computer also disabled a perfectly healthy auxiliary two decks away — the
+opposite of why a second one is fitted.
 
 ### Power is a budget with load shedding
 
@@ -1393,7 +1407,7 @@ subsystem rather than the hull.
 npm test
 ```
 
-861 assertions, no framework, about a second. They drive the real `Systems`,
+871 assertions, no framework, about a second. They drive the real `Systems`,
 `Crew` and `Ballistics` classes with no renderer attached and cover the things
 that are expensive to notice by flying around: network redundancy on each hull,
 load-shed ordering, the shield coupling curve and both of its failure modes, the
