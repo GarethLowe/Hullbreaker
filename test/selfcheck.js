@@ -1939,7 +1939,7 @@ for (const [id, h] of Object.entries(HULLS)) {
   const game = {
     scene,
     ships: [],
-    fx: { smokePuff() {}, explosion() {} },
+    fx: { motorPlume() {}, explosion() {} },
     audio: { boom() {} },
     explode(pos, opts) { blasts.push({ pos: pos.clone(), owner: opts.owner }); },
   };
@@ -1981,6 +1981,260 @@ for (const [id, h] of Object.entries(HULLS)) {
   ball.resolvePath(new Vector3(0, 0, 0), new Vector3(0, 0, 1), 2000,
     { energy: 1e6, ap: 1, dwell: 1e-3, owner: gunner, caliber: 'shrapnel', impulse: 10 });
   ok('a blast fan leaves other warheads alone', ball.missiles.length === 1);
+}
+
+// --- point defence covers the ship, not just the roof ------------------------
+// A mount cannot depress below the deck it is bolted to, so a hull carrying
+// nothing but dorsal repeaters is wide open from underneath — and every hull
+// here was. A torpedo run from below arrived unopposed against all four.
+{
+  const DEPRESS = Math.sin(MOUNT_DEPRESSION);
+  for (const [id, hull] of Object.entries(HULLS)) {
+    const pd = hull.hardpoints.filter((m) => WEAPONS[m.weapon].pointDefence);
+    // Fibonacci sphere: even coverage of every bearing, cheaply.
+    const N = 900;
+    let covered = 0;
+    for (let i = 0; i < N; i++) {
+      const y = 1 - (i / (N - 1)) * 2;
+      const rr = Math.sqrt(Math.max(0, 1 - y * y));
+      const th = Math.PI * (1 + Math.sqrt(5)) * i;
+      const v = new Vector3(Math.cos(th) * rr, y, Math.sin(th) * rr);
+      for (const m of pd) {
+        const rest = new Vector3(...m.dir).normalize();
+        if (Math.acos(Math.max(-1, Math.min(1, rest.dot(v)))) > m.arc) {
+          continue;
+        }
+        const sec = hull.sectionById[m.section];
+        // And it must not be asked to fire through its own plating.
+        if (v.dot(mountFrame(m.pos, sec.half, m.dir, sec.style).up) < -DEPRESS) {
+          continue;
+        }
+        covered++;
+        break;
+      }
+    }
+    const pct = (100 * covered) / N;
+    if (id === 'sabre') {
+      // The picket is the deliberate exception: no deck space for a ring and no
+      // plant to run one, so it has real blind arcs. That is the class.
+      ok(`${id}: a picket has genuine blind arcs`, pct > 30 && pct < 85,
+        `covers ${pct.toFixed(0)}% of the sky with ${pd.length} mounts`);
+    } else {
+      ok(`${id}: point defence covers every bearing`, pct > 99,
+        `covers ${pct.toFixed(0)}% of the sky with ${pd.length} mounts`);
+    }
+    ok(`${id}: point defence feeds from its own locker`,
+      pd.every((m) => m.feed === 'mag_pd'));
+  }
+}
+
+// --- seekers actually intercept ---------------------------------------------
+// Proportional navigation steers to null the ROTATION of the sight line, which
+// is a different thing from pointing at a predicted position, and it is easy to
+// implement in a way that looks right and misses every time. The first pass
+// rate-limited the NOSE — lerping the heading toward the commanded one by
+// `turnRate * dt` — which clips every command to a fraction of a degree,
+// because the commanded heading is only a couple of degrees off the current one
+// by construction. Guidance appeared to work perfectly and the missile sailed
+// past a stationary picket at 250 metres, every single time. Nothing but a
+// measured miss distance catches that.
+{
+  const scene = { add() {}, remove() {} };
+  const game = {
+    scene,
+    ships: [],
+    fx: { motorPlume() {}, explosion() {} },
+    audio: { boom() {} },
+    explode() {},
+  };
+  const ball = new Ballistics(game);
+
+  /** Fly one warhead at a target and report how close it got, in metres. */
+  const intercept = (weapon, from, aimAt, target, seconds) => {
+    ball.missiles.length = 0;
+    ball.spawnMissile({ name: 'LAUNCHER', faction: 'a' }, from,
+      aimAt.clone().sub(from).normalize(), new Vector3(), weapon, target);
+    ball.missiles[0].armT = 1e9;      // never fuse; we want the miss distance
+    let best = Infinity;
+    const dt = 1 / 60;
+    for (let t = 0; t < seconds; t += dt) {
+      target.position.addScaledVector(target.velocity, dt);
+      ball._stepMissiles(dt);
+      if (ball.missiles.length === 0) {
+        break;
+      }
+      best = Math.min(best, ball.missiles[0].pos.distanceTo(target.position));
+    }
+    return best;
+  };
+  const dummy = (pos, vel) => ({
+    position: pos, velocity: vel, disposed: false, dead: false,
+    hitRadius: 40, faction: 'b',
+    sys: { get: () => null },
+    heatSignature: () => 4000,
+  });
+
+  {
+    const t = dummy(new Vector3(600, 0, 4000), new Vector3());
+    const miss = intercept(WEAPONS.seeker, new Vector3(), new Vector3(0, 0, 1), t, 12);
+    ok('a seeker hits a stationary target it was launched past',
+      miss < 40, `missed by ${miss.toFixed(0)} m`);
+  }
+  {
+    // Crossing at 300 m/s: the case pure pursuit cannot solve at all.
+    const t = dummy(new Vector3(0, 0, 4500), new Vector3(300, 0, 0));
+    const miss = intercept(WEAPONS.seeker, new Vector3(), new Vector3(0, 0, 1), t, 12);
+    ok('...and one crossing at three hundred metres a second',
+      miss < 60, `missed by ${miss.toFixed(0)} m`);
+  }
+  {
+    const t = dummy(new Vector3(400, 0, 4000), new Vector3(-120, 60, 0));
+    const miss = intercept(WEAPONS.torpedo, new Vector3(), new Vector3(0, 0, 1), t, 30);
+    ok('and a torpedo, which turns a third as hard, still connects',
+      miss < 60, `missed by ${miss.toFixed(0)} m`);
+  }
+
+  // The seeker head: two channels, and which one wins is a fact about the
+  // target rather than a coin toss.
+  {
+    const cold = dummy(new Vector3(0, 0, 2000), new Vector3());
+    cold.hitRadius = 200;                 // a big hull, coasting
+    cold.heatSignature = () => 50;
+    const hot = dummy(new Vector3(300, 0, 2000), new Vector3());
+    hot.hitRadius = 30;                   // a picket at full burn
+    hot.heatSignature = () => 4e5;
+    game.ships = [cold, hot];
+    const m = {
+      pos: new Vector3(), vel: new Vector3(0, 0, 400),
+      weapon: WEAPONS.seeker, owner: { faction: 'a' }, band: null,
+    };
+    ok('an infrared head takes the hot picket over the cold dreadnought',
+      ball._acquire(m) === hot && m.band === 'IR');
+    hot.heatSignature = () => 5;          // engines cut
+    ok('...and once it goes cold, the optical channel takes the big one',
+      ball._acquire(m) === cold && m.band === 'OPT');
+    // And never the fleet it was launched by.
+    cold.faction = 'a';
+    hot.faction = 'a';
+    ok('a seeker will not turn on its own side', ball._acquire(m) === null);
+    game.ships = [];
+  }
+}
+
+// --- directors spread across a salvo ----------------------------------------
+// Every mount picking the nearest warhead meant a ring of eight stacked on the
+// leader of a salvo and the rest arrived untouched. And folding the doubling-up
+// penalty into the RANGE budget — the first attempt — was worse: the fourth
+// director to look at a lone torpedo scored it 2700 m past where it was,
+// decided it was out of reach and went off to shoot at the ship instead.
+{
+  const ship = Object.create(Ship.prototype);
+  ship.faction = 'friendly';
+  ship.body = { quat: new Quaternion() };
+  ship.localToWorld = (local, out) => out.copy(local);
+  ship._pdTarget = { pos: null, vel: null, cone: 0 };
+  ship._pdLoad = new Map();
+  const warheads = [
+    { pos: new Vector3(0, 0, 400), vel: new Vector3(), armT: 0, owner: { faction: 'x' } },
+    { pos: new Vector3(0, 0, 500), vel: new Vector3(), armT: 0, owner: { faction: 'x' } },
+    { pos: new Vector3(0, 0, 600), vel: new Vector3(), armT: 0, owner: { faction: 'x' } },
+  ];
+  ship.game = { ballistics: { missiles: warheads }, ships: [] };
+  const mount = {
+    def: { arc: Math.PI }, weapon: WEAPONS.repeater, rest: new Vector3(0, 0, 1),
+    origin: new Vector3(),
+  };
+
+  const taken = [];
+  for (let i = 0; i < 6; i++) {
+    const t = ship._pdThreat(mount);
+    taken.push(warheads.findIndex((m) => m.pos === t.pos));
+  }
+  ok('a ring of directors spreads itself across a salvo',
+    new Set(taken).size === 3, `took ${taken.join(',')}`);
+  ok('...nearest first', taken[0] === 0 && taken[1] === 1 && taken[2] === 2);
+
+  // A lone warhead gets the whole battery — the penalty ranks candidates, it
+  // does not disqualify them.
+  ship._pdLoad.clear();
+  warheads.length = 1;
+  let all = true;
+  for (let i = 0; i < 8; i++) {
+    all = all && ship._pdThreat(mount) !== null;
+  }
+  ok('but a lone torpedo gets every mount that can bear', all);
+
+  // Ordnance always wins the argument against a hull.
+  ship._pdLoad.clear();
+  const hull = {
+    position: new Vector3(0, 0, 900), velocity: new Vector3(), hitRadius: 80,
+    disposed: false, dead: false, faction: 'x',
+  };
+  ship.game.ships = [ship, hull];
+  ok('a director drops a ship the moment a warhead is in its arc',
+    ship._pdThreat(mount).pos === warheads[0].pos);
+  warheads.length = 0;
+  ship._pdLoad.clear();
+  ok('...and holds the ship when nothing is inbound',
+    ship._pdThreat(mount).pos === hull.position);
+  hull.position.set(0, 0, WEAPONS.repeater.pdShipRange + 10);
+  ship._pdLoad.clear();
+  ok('...but not past the band it was given', ship._pdThreat(mount) === null);
+}
+
+// --- fire survives the round that started it --------------------------------
+// The one that made fire exist. A hit that opens a compartment is also the hit
+// that spills something flammable into it, and the compartment then vents — so
+// under the old rule (fire needs the compartment's air) every fire aboard went
+// out within seconds of starting, and the only fires that ever burned were in
+// sealed rooms nothing had hit. A spill carries its own oxidiser.
+{
+  const sys = fresh();
+  run(sys, 0.5);
+  const sec = sys.section('spine');
+  sec.spill = 0.5;
+  // Sixty seconds of fuel, so the thirty this runs for cannot exhaust it —
+  // "the fire went out" has to mean the vacuum did it, not the clock.
+  ok('a spill fire lights', sys.ignite('spine', 60));
+  sys.punchHole('spine', 4);
+  run(sys, 30);
+  ok('...and the compartment vents', sec.atmo < 0.05, `atmo ${sec.atmo.toFixed(3)}`);
+  ok('...and it is still burning in the vacuum', sec.fire > 0,
+    `fire ${sec.fire.toFixed(1)} s, spill ${sec.spill.toFixed(2)}`);
+  // But burning the volatile off does put it out, and so does the crew opening
+  // the compartment to space on purpose.
+  sec.spill = 0;
+  run(sys, 3);
+  ok('once the spill is gone, so is the fire', sec.fire === 0);
+}
+{
+  const sys = fresh();
+  run(sys, 0.5);
+  sys.section('spine').spill = 0.8;
+  sys.ignite('spine', 30);
+  sys.ventSection('spine');
+  run(sys, 6);
+  ok('an emergency vent still smothers a fire outright',
+    sys.section('spine').fire === 0);
+}
+{
+  // Gunfire has to be able to START one, or none of the above ever happens.
+  const sys = fresh();
+  run(sys, 0.5);
+  const sec = sys.section('fwdbattery');
+  let lit = 0;
+  for (let trial = 0; trial < 40; trial++) {
+    sec.spill = 0;
+    sec.fire = 0;
+    sec.atmo = 1;
+    for (let i = 0; i < 10; i++) {
+      sys.damageSection('fwdbattery', sec.plateMax * 0.05, null, null);
+    }
+    if (sec.fire > 0) {
+      lit++;
+    }
+  }
+  ok('shellfire starts fires', lit > 20, `${lit} of 40 salvos lit one`);
 }
 
 // --- report -----------------------------------------------------------------

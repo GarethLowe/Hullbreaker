@@ -119,6 +119,15 @@ export const XRAY_DRAW = 0.22;
 export const XRAY_HOLD = 2.6;
 export const XRAY_FADE = 6.5;
 
+/** Live wounds a hull remembers the position of, for venting and fire. */
+const MAX_HOLES = 32;
+
+/**
+ * How much further away a second director will look before it agrees to double
+ * up on a warhead another one is already tracking. See `_pdThreat`.
+ */
+const PD_DOUBLE_UP = 900;
+
 export class Ship {
   constructor(game, hullId, opts = {}) {
     this.game = game;
@@ -148,6 +157,19 @@ export class Ship {
     this.jolt = 0;
     /** Magazine-fed mounts all draw the same nature of round; see AMMO. */
     this.ammo = 'ap';
+    /**
+     * Where this hull has actually been holed, in body coordinates, with the
+     * outward normal of the plating it went through. Recorded by `mark` and
+     * read by the effects: a compartment vents from its wounds, not from a
+     * point floating in the middle of the room.
+     */
+    this.holes = [];
+    /** Scratch descriptor handed to the point-defence laying code. */
+    this._pdTarget = { pos: null, vel: null, cone: 0.035 };
+    /** How many directors are already on each warhead this tick. */
+    this._pdLoad = new Map();
+    /** Infrared brightness, recomputed once a tick. See `heatSignature`. */
+    this._ir = 0;
 
     this.sys = new Systems(this.hull, this);
     this.crew = new Crew(this.hull, this.sys);
@@ -473,39 +495,106 @@ export class Ship {
   }
 
   /**
-   * What this mount should be shooting at: the inbound warhead it can actually
-   * reach, nearest first. Hostile ordnance only — never a hull, never one of
-   * this faction's own torpedoes on their way out.
+   * What this mount should be shooting at.
+   *
+   * Ordnance first and always: a warhead is the only thing in the sky that can
+   * open three compartments at once, and a director that is holding a hull when
+   * one arrives has failed at the job it was fitted for. Only once nothing is
+   * inbound does it look for a ship, and only inside the much shorter
+   * `pdShipRange` — a repeater is a rounding error against a belt at four
+   * kilometres and a real nuisance at one.
+   *
+   * Returns a shared descriptor rather than the thing itself, because the two
+   * kinds of target answer the same three questions in different ways and the
+   * laying code should not have to care which it got. It is scratch: valid
+   * until the next call, which is exactly as long as anything needs it.
    */
   _pdThreat(mount) {
-    const missiles = this.game.ballistics.missiles;
-    if (missiles.length === 0) {
-      return null;
-    }
-    const reach = mount.weapon.pdRange;
+    const w = mount.weapon;
+    const t = this._pdTarget;
     this.localToWorld(mount.origin, _o);
     _mnt.copy(mount.rest).applyQuaternion(this.body.quat);
+
+    const inArc = (pos) => {
+      _v2.copy(pos).sub(_o);
+      const d = _v2.length();
+      if (d < 1e-3) {
+        return -1;
+      }
+      _v2.multiplyScalar(1 / d);
+      // It has to be inside the traverse, or the gun would train to the stop
+      // and fire into its own plating.
+      return Math.acos(clamp(_v2.dot(_mnt), -1, 1)) > mount.def.arc ? -1 : d;
+    };
+
     let best = null;
-    let bestD = reach;
-    for (const m of missiles) {
+    // Range decides what is a candidate; the score only ranks the candidates.
+    // Folding the doubling-up penalty into the range budget instead — which is
+    // what this did first — meant the fourth director to look at a lone
+    // torpedo scored it at 2700 m past where it actually was, decided it was
+    // out of reach, and went off to shoot at the ship. A ring of eight engaged
+    // with three and everything got through.
+    let bestScore = Infinity;
+    for (const m of this.game.ballistics.missiles) {
       if (m.armT > 0 || (m.owner && m.owner.faction === this.faction)) {
         continue;
       }
-      _v2.copy(m.pos).sub(_o);
-      const d = _v2.length();
-      if (d >= bestD || d < 1e-3) {
+      const d = inArc(m.pos);
+      if (d < 0 || d >= w.pdRange) {
         continue;
       }
-      // It has to be inside the traverse, or the gun would train to the stop
-      // and fire into its own plating.
-      _v2.multiplyScalar(1 / d);
-      if (Math.acos(clamp(_v2.dot(_mnt), -1, 1)) > mount.def.arc) {
+      // A director tracks ONE thing. Every mount picking the nearest warhead
+      // meant eight of them stacked on the leading torpedo of a salvo and the
+      // rest of it arrived untouched — or, once the ring was fitted to every
+      // hull, the leader died eight times over and a salvo of four died one at
+      // a time with rounds to spare. Either way the number of mounts a ship
+      // carried barely changed what got through, which is the one thing point
+      // defence is supposed to decide.
+      //
+      // Doubling up costs `PD_DOUBLE_UP` metres of apparent range, so a second
+      // director joins the same warhead only when the next one out is further
+      // away than that. Salvos split the battery; a lone torpedo gets all of it.
+      const score = d + (this._pdLoad.get(m) || 0) * PD_DOUBLE_UP;
+      if (score >= bestScore) {
         continue;
       }
       best = m;
+      bestScore = score;
+    }
+    if (best) {
+      this._pdLoad.set(best, (this._pdLoad.get(best) || 0) + 1);
+      t.pos = best.pos;
+      t.vel = best.vel;
+      // A torpedo is three metres across. The gun does not fire until it is
+      // genuinely pointing at it.
+      t.cone = 0.035;
+      return t;
+    }
+
+    if (!w.pdShipRange) {
+      return null;
+    }
+    let bestD = w.pdShipRange;
+    for (const s of this.game.ships) {
+      if (s === this || s.disposed || s.dead || s.faction === this.faction) {
+        continue;
+      }
+      const d = inArc(s.position);
+      if (d < 0 || d >= bestD) {
+        continue;
+      }
+      best = s;
       bestD = d;
     }
-    return best;
+    if (!best) {
+      return null;
+    }
+    t.pos = best.position;
+    t.vel = best.velocity;
+    // A hull subtends real sky at these ranges, so the mount may open up as
+    // soon as any part of it is under the gun rather than the exact centre.
+    t.cone = 0.035 + best.hitRadius / Math.max(bestD, 1);
+    return t;
   }
 
   /**
@@ -530,7 +619,7 @@ export class Ship {
       return;
     }
 
-    // Lead it. A torpedo runs at 620 m/s and the slug at 1600, so the lead is
+    // Lead it. A torpedo runs at 620 m/s and the slug at 1900, so the lead is
     // large and getting it wrong means every round passes behind the warhead.
     this.localToWorld(mount.origin, _o);
     _v2.copy(threat.pos).sub(_o);
@@ -554,13 +643,13 @@ export class Ship {
     if (mount.cool > 0 || !this._canDraw(w.draw)) {
       return;
     }
-    // Only when it is genuinely pointing at the thing. A torpedo is small, so
-    // this is a tight cone rather than the generous one used against hulls —
-    // and the ammunition check comes AFTER it, because `_takeAmmo` spends the
-    // round it is asked about and a mount still slewing must not be billed for
-    // shots it never took.
+    // Only when it is genuinely pointing at the thing. The cone comes from the
+    // threat — tight for a warhead, as wide as the hull for a ship — and the
+    // ammunition check comes AFTER it, because `_takeAmmo` spends the round it
+    // is asked about and a mount still slewing must not be billed for shots it
+    // never took.
     _v2.copy(threat.pos).sub(_o).normalize();
-    if (mount.aim.dot(_v2) < Math.cos(0.035) || !this._takeAmmo(mount)) {
+    if (mount.aim.dot(_v2) < Math.cos(threat.cone) || !this._takeAmmo(mount)) {
       return;
     }
     this.sys.capStore = Math.max(0, this.sys.capStore - w.draw);
@@ -853,6 +942,52 @@ export class Ship {
     _mn.copy(worldNormal).applyQuaternion(_mq);
     this._seatOnSkin(_mp, _mn);
     this.decals.add(_mp, _mn, opts);
+    if (opts.hole && opts.section) {
+      // Remember it. A hole is a permanent fact about the hull until the crew
+      // weld it, and it is where the compartment behind it vents from and
+      // where a fire in there shows itself. The ring is small on purpose: a
+      // ship with thirty-two live wounds is already venting from everywhere.
+      this.holes.push({ p: _mp.clone(), n: _mn.clone(), section: opts.section });
+      if (this.holes.length > MAX_HOLES) {
+        this.holes.shift();
+      }
+    }
+  }
+
+  /**
+   * How bright this hull is in the infrared, in units that only have to be
+   * comparable between ships. Read by seeker heads; see `Ballistics._acquire`.
+   *
+   * Everything in it is a real fact about the ship's state, which is what makes
+   * the weapon interesting: cutting the throttle genuinely dims you, running
+   * the drives hard genuinely lights you up, and a hull already on fire cannot
+   * hide at all. Recomputed once a tick, not once per missile per frame.
+   */
+  heatSignature() {
+    return this._ir;
+  }
+
+  _updateSignature() {
+    const area = this.hitRadius * this.hitRadius;
+    // A crewed hull is never cold: it is radiating its own hotel load.
+    let s = 0.12;
+    s += clamp01(Math.abs(this.autopilot.cmd.throttle)) * 1.6;
+    if (this.autopilot.boostT > 0) {
+      s += 1.4;
+    }
+    for (const m of this.sys.modules.values()) {
+      if (m.kind === 'reactor' && !m.destroyed) {
+        s += 0.55 * clamp01(m.duty || 0);
+      }
+    }
+    for (const sec of this.sys.sections.values()) {
+      if (sec.fire > 0) {
+        s += 0.6;
+      } else if (sec.breached) {
+        s += 0.05;
+      }
+    }
+    this._ir = area * s;
   }
 
   /**
@@ -1161,6 +1296,8 @@ export class Ship {
    */
   updateWeapons(dt, target, shouldFire) {
     const ball = this.game.ballistics;
+    // Fresh every tick: which warheads the directors have already taken.
+    this._pdLoad.clear();
     {
       for (const mount of this.mounts) {
         // Point defence answers to nothing but the ordnance in the sky.
@@ -1191,6 +1328,15 @@ export class Ship {
             ball.fireBeam(this, mount, _o, mount.aim, dt);
             this.sys.capStore = Math.max(0, this.sys.capStore - w.draw * dt);
             mod.heatAcc += w.heat * mount.scale;
+            // A lance is a continuous event, so it needs a continuous sound —
+            // re-struck often enough to overlap into one. A weapon that pours
+            // twelve megawatts into a hull and makes no noise at all reads as
+            // broken, and until now this one did.
+            mount.sndT = (mount.sndT || 0) - dt;
+            if (mount.sndT <= 0) {
+              mount.sndT = 0.11;
+              this.game.audio.fire('beam', _o, mount.scale);
+            }
           }
           continue;
         }
@@ -1269,6 +1415,7 @@ export class Ship {
     }
     this.sys.tick(dt);
     this.crew.tick(dt);
+    this._updateSignature();
     this._drainSystemEvents();
     this.autopilot.update(this.body, dt);
     this.body.integrate(dt);
@@ -1289,7 +1436,10 @@ export class Ship {
       switch (e.type) {
         case 'cookoff': {
           const at = this.sectionWorld(e.section, _v);
-          fx.explosion(at, 9 + Math.min(18, e.energy / 6e5), 0xffb060);
+          // A magazine going up blows the compartment open from inside, so the
+          // pieces of it leave the ship rather than staying in the room.
+          fx.explosion(at, 9 + Math.min(18, e.energy / 6e5), 0xffb060,
+            { vel: this.body.vel, heavy: true });
           this.crew.killIn(e.section, 2);
           this.game.audio.boom(at, 1);
           // Through Ship, not Body: a magazine going off inside your own hull
@@ -1299,7 +1449,11 @@ export class Ship {
           break;
         }
         case 'detonate': {
-          this.game.audio.boom(this.body.pos, 1.4);
+          // The containment failed. This is the largest single event either
+          // side of a fight can cause, and it should look and sound like the
+          // end of the ship rather than like one more secondary.
+          fx.reactorBlast(this.body.pos, this.body.vel, this.hull.radius * 0.55);
+          this.game.audio.reactor(this.body.pos, 1.6);
           this.game.onShipDestroyed(this, 'reactor');
           break;
         }
@@ -1443,20 +1597,94 @@ export class Ship {
       this.shieldMesh.visible = this.sys.shield.up && (u.uCharge.value > 0.02 || anyHit);
     }
 
-    // Venting compartments and open fires are the ship telling you what is
-    // wrong from the outside, before you ever open the schematic.
+    this._damageFx(dt);
+  }
+
+  /**
+   * What the ship looks like from outside when it is hurt.
+   *
+   * Both effects come out of the actual wounds. A compartment does not vent
+   * from a point hovering in the middle of the room and a fire aboard is not a
+   * candle — it is a bay full of burning stores with a hole in the side of it,
+   * so what is visible from a kilometre away is a jet coming out of that hole,
+   * dragged flat by the ship's own motion.
+   *
+   * Venting is driven off the HOLE being open rather than off the air being
+   * left, and runs until the crew weld it shut. The plume thins as the
+   * atmosphere goes and then runs on: what is coming out of a hull breach after
+   * the first minute is sublimating coolant, fuel vapour and stores outgassing
+   * into vacuum, and it does not stop because the compartment reached zero.
+   * "The hole stopped smoking so it must be fixed" would be a lie the ship
+   * tells the player about its own condition.
+   */
+  _damageFx(dt) {
+    const fx = this.game.fx;
     for (const s of this.sys.sections.values()) {
-      if (s.fire > 0 && Math.random() < 6 * dt) {
-        this.sectionWorld(s.id, _v);
-        _v.x += rand(-2, 2);
-        _v.y += rand(-2, 2);
-        _v.z += rand(-2, 2);
-        this.game.fx.fireLick(_v, this.body.vel);
-      } else if ((s.breached || s.venting) && s.atmo > 0.05 && Math.random() < 4 * dt) {
-        this.sectionWorld(s.id, _v);
-        this.game.fx.ventJet(_v, this.body.vel, s.venting ? 1.6 : 0.8);
+      const burning = s.fire > 0;
+      const open = s.breachSize > 0 || s.venting;
+      if (!burning && !open) {
+        continue;
+      }
+      if (burning) {
+        // Rate follows how hard it is burning, so a bay that has nearly run out
+        // of fuel guts rather than roars.
+        const power = clamp01(s.fire / 4) * (0.35 + 0.65 * clamp01(s.atmo / 0.4));
+        if (Math.random() < (6 + 14 * power) * dt) {
+          this._woundPoint(s.id, _v, _n);
+          fx.fireLick(_v, _n, this.body.vel, power);
+        }
+      }
+      if (open && Math.random() < 6 * dt) {
+        // Full-throated while there is air behind it, a thin persistent wisp
+        // once there is not.
+        const strength = s.venting ? 1.7 : (0.30 + 1.1 * clamp01(s.atmo));
+        this._woundPoint(s.id, _v, _n);
+        fx.ventJet(_v, _n, this.body.vel, strength);
       }
     }
+  }
+
+  /**
+   * A point on this compartment's skin for damage effects to come out of, in
+   * world space, with the outward normal. Prefers a hole the ship actually has;
+   * falls back to a random point on the compartment's own surface, because a
+   * compartment can be open to space through its frame without any one round
+   * having left a decal anybody kept.
+   */
+  _woundPoint(sectionId, outP, outN) {
+    if (this.holes.length > 0) {
+      // Linear scan. The ring is 32 long and this runs a few times a second per
+      // burning compartment, so an index would cost more to maintain than it
+      // saves.
+      let n = 0;
+      let pick = null;
+      for (const h of this.holes) {
+        if (h.section === sectionId && Math.random() < 1 / ++n) {
+          pick = h;
+        }
+      }
+      if (pick) {
+        this.localToWorld(pick.p, outP);
+        outN.copy(pick.n).applyQuaternion(this.body.quat);
+        return;
+      }
+    }
+    const def = this.hull.sectionById[sectionId];
+    this.sectionWorld(sectionId, outP);
+    if (!def) {
+      outN.set(0, 1, 0);
+      return;
+    }
+    // A face of the box, chosen at random and offset out to it.
+    const axis = Math.floor(rand(0, 3)) % 3;
+    const sign = Math.random() < 0.5 ? -1 : 1;
+    _v2.set(rand(-1, 1) * def.half[0], rand(-1, 1) * def.half[1],
+      rand(-1, 1) * def.half[2]);
+    _v2.setComponent(axis, sign * def.half[axis]);
+    outN.set(0, 0, 0).setComponent(axis, sign);
+    _v2.applyQuaternion(this.body.quat);
+    outN.applyQuaternion(this.body.quat);
+    outP.add(_v2);
   }
 
   dispose() {

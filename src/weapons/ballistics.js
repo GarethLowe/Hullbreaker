@@ -21,17 +21,25 @@ import { clamp01, rand, randomDirection, coneDirection } from '../core/mathx.js'
 
 const MAX_TRACERS = 900;
 /**
- * How close a round has to pass a torpedo to kill it, metres.
+ * How close a round has to pass a warhead to kill it, metres, when the warhead
+ * does not say otherwise.
  *
- * Generous on purpose, and it is the number that makes point defence a system
- * rather than decoration. A torpedo body is about three metres across; a
- * repeater lays rounds with 6 mrad of dispersion, which is twelve metres of
- * scatter at two kilometres, so a hull-sized intercept radius would mean the
- * PD mounts essentially never connected and every warhead launched at you
- * arrived. Nine metres stands for the round's own fragmentation and the
- * seeker's fragility: hit near it and it does not survive to run.
+ * This is not the body's size — it is body size plus how much of a near miss
+ * the thing does not survive, which is a fact about how it is built. A seeker
+ * is a thin-skinned 260 kg vehicle carrying an optical head: anything close
+ * ends it. A torpedo is four tonnes with structure around the warhead and
+ * wants very nearly a direct hit, which is what `WEAPONS.torpedo.interceptR`
+ * says.
+ *
+ * It was nine for everything, and nine was right when a hull carried two
+ * directors at 400 rpm — without the padding they essentially never connected
+ * and every warhead launched at you arrived. A hull now carries eight to
+ * twelve, so the padding stopped compensating for a weak system and started
+ * making an overwhelming one: measured against a full ring, twenty-three
+ * seekers and six torpedoes were shot down for zero leakage and the target
+ * finished on a hundred per cent plate.
  */
-const INTERCEPT_RADIUS = 9;
+const INTERCEPT_RADIUS = 5;
 /** Obliquity floor — a perfectly grazing hit would otherwise cost infinity. */
 const MIN_COS = 0.16;
 /** Below this cosine (~70 deg off normal) a non-penetrating slug deflects. */
@@ -49,6 +57,31 @@ const RICOCHET_COS = 0.40;
  */
 const markRadius = (joules) => Math.min(14, 1.1 + Math.sqrt(Math.max(joules, 0) * 1e-6) * 0.55);
 
+/**
+ * How much of a blast an impact of this size should throw, 0.5 to 6.
+ *
+ * Sized off the square root of the energy actually delivered, because that is
+ * what the radius of a vapour cloud goes as. A 23 kJ repeater round barely
+ * flickers; a 40 MJ tungsten penetrator coming out the far side of a cruiser
+ * throws a piece of that cruiser with it.
+ */
+const blastScale = (joules) => Math.min(6,
+  Math.max(0.5, Math.sqrt(Math.max(joules, 0) * 1e-6) * 0.42));
+
+/**
+ * Navigation constant for the seekers' proportional guidance. Three to five is
+ * the textbook band; four turns hard enough to catch a manoeuvring capital ship
+ * without wasting so much energy on the correction that it arrives slow.
+ */
+const NAV_GAIN = 4.0;
+
+/**
+ * How far off its own velocity a seeker may tip the motor. At 0.94 the thrust
+ * is 70 degrees off the flight path — everything the airframe has, with just
+ * enough forward component left to hold speed against drag it does not have.
+ */
+const MAX_TILT = 0.94;
+
 const _o = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _p = new THREE.Vector3();
@@ -56,6 +89,13 @@ const _n = new THREE.Vector3();
 const _t = new THREE.Vector3();
 /** Scratch for the penetration trace; `_p` is already the live hit point. */
 const _xr = new THREE.Vector3();
+/** Guidance scratch. `_o`, `_d` and `_p` are all live across a seeker update. */
+const _los = new THREE.Vector3();
+const _rel = new THREE.Vector3();
+const _omega = new THREE.Vector3();
+const _lat = new THREE.Vector3();
+const _nose = new THREE.Vector3();
+const _want = new THREE.Vector3();
 
 export class Ballistics {
   constructor(game) {
@@ -126,6 +166,10 @@ export class Ballistics {
 
   spawnMissile(ship, origin, dir, inherit, weapon, target) {
     const mesh = new THREE.Mesh(this.missileGeo, this.missileMat);
+    const active = weapon.guidance === 'active';
+    // A 260 kg seeker is not a four-tonne torpedo, and at gunnery range the
+    // silhouette is the only thing that says which one is coming at you.
+    mesh.scale.setScalar(active ? 0.55 : 1);
     this.game.scene.add(mesh);
     this.missiles.push({
       pos: origin.clone(),
@@ -134,13 +178,166 @@ export class Ballistics {
       weapon,
       owner: ship,
       target,
-      // A seeker aims at the locked SUBSYSTEM when there is one, which is what
-      // makes subsystem targeting worth doing with ordnance rather than guns.
-      subsystem: ship.isPlayer ? this.game.targeting.subsystem : null,
+      // A command-guided torpedo aims at the locked SUBSYSTEM when there is
+      // one, which is what makes subsystem targeting worth doing with ordnance
+      // rather than guns. An active seeker has its own head and no idea what a
+      // subsystem is.
+      subsystem: !active && ship.isPlayer ? this.game.targeting.subsystem : null,
+      /** Which channel of the head is holding this lock; see `_acquire`. */
+      band: null,
+      /** Countdown to the next sweep of the seeker head. */
+      scanT: 0,
       fuse: weapon.fuse,
       mesh,
       armT: 0.35,
     });
+  }
+
+  /**
+   * The seeker head: score every contact it can see, take the best.
+   *
+   * Two channels, and which one wins is a real fact about the target rather
+   * than a coin toss. Both fall off as the inverse square of range, because
+   * both are measuring flux arriving at a lens.
+   *
+   *   INFRARED  the contact's own heat — drives at full burn, a reactor under
+   *             load, fires aboard, a hull venting a hot coolant loop. Blind to
+   *             size: a picket accelerating hard is a brighter target than a
+   *             dreadnought coasting cold.
+   *
+   *   OPTICAL   the solid angle the contact subtends, which is size over range
+   *             squared. Cannot be dimmed by shutting anything down, and cannot
+   *             tell a wreck from a warship.
+   *
+   * Returns null when the head has nothing, which is a real outcome — a missile
+   * launched into empty sky flies on ballistically until its fuse runs out.
+   */
+  _acquire(m) {
+    const s = m.weapon.seeker;
+    if (m.vel.lengthSq() < 1e-6) {
+      return null;
+    }
+    _nose.copy(m.vel).normalize();
+    const cosFov = Math.cos(s.fov);
+    let best = null;
+    let bestScore = 0;
+    let bestBand = null;
+    for (const ship of this.game.ships) {
+      if (ship.disposed || ship === m.owner) {
+        continue;
+      }
+      // It is not so stupid as to turn round on the fleet that launched it.
+      if (m.owner && ship.faction === m.owner.faction) {
+        continue;
+      }
+      _rel.copy(ship.position).sub(m.pos);
+      const r = _rel.length();
+      if (r > s.range || r < 1e-3) {
+        continue;
+      }
+      if (_rel.dot(_nose) / r < cosFov) {
+        continue;
+      }
+      const falloff = 1 / (r * r);
+      const ir = s.ir * ship.heatSignature() * falloff;
+      const optical = s.optical * ship.hitRadius * ship.hitRadius * falloff * 0.55;
+      // A wreck still radiates and still fills the frame, so the head does not
+      // ignore one — it simply prefers anything that is still fighting.
+      const weight = ship.dead ? 0.2 : 1;
+      const score = Math.max(ir, optical) * weight;
+      if (score > bestScore) {
+        bestScore = score;
+        best = ship;
+        bestBand = ir >= optical ? 'IR' : 'OPT';
+      }
+    }
+    m.band = best ? bestBand : null;
+    return best;
+  }
+
+  /**
+   * Proportional navigation. Writes the heading the motor should be pushing
+   * along into `_want`.
+   *
+   * The old law was lead pursuit: work out where the target will be, point at
+   * that, repeat. It is stable against a stationary target and hopeless against
+   * a manoeuvring one, because the aim point moves every frame and the seeker
+   * spends its entire turn budget chasing an error it re-creates.
+   *
+   * PN steers to null the ROTATION of the line of sight instead. If the bearing
+   * to the target is not changing, the two are on a collision course whatever
+   * either of them is doing — so a seeker on a good intercept flies almost
+   * straight, and has its whole turn rate left over for the moment the target
+   * breaks. It is what every real missile since the 1950s uses, and it is four
+   * lines of vector algebra.
+   */
+  _guide(m, aimPoint, targetVel) {
+    const w = m.weapon;
+    _o.copy(aimPoint).sub(m.pos);
+    const r = _o.length();
+    const speed = m.vel.length();
+    if (r < 1e-3 || speed < 1e-3) {
+      _want.copy(m.vel).normalize();
+      return;
+    }
+    _los.copy(_o).multiplyScalar(1 / r);
+    _rel.copy(targetVel).sub(m.vel);
+    // Rotation rate of the sight line, as a vector along the axis it turns
+    // about: omega = (r x v) / |r|^2.
+    _omega.crossVectors(_o, _rel).multiplyScalar(1 / (r * r));
+    const closing = Math.max(-_rel.dot(_los), 1);
+    _nose.copy(m.vel).multiplyScalar(1 / speed);
+    const ahead = _nose.dot(_los);
+
+    let saturate = false;
+    if (ahead < 0.5) {
+      // PN has nothing to work with when the target is off to one side or
+      // behind: there is no intercept geometry yet to hold. Put the nose as far
+      // toward it as the machine can be tipped and keep it there until there
+      // is one.
+      _lat.copy(_los).addScaledVector(_nose, -ahead);
+      saturate = true;
+    } else {
+      // The lateral acceleration that kills the sight line's rotation.
+      _lat.crossVectors(_omega, _los).multiplyScalar(NAV_GAIN * closing);
+      // Thrust is along the nose and cannot both turn the missile and drive it
+      // forward, so only the part of the command across the heading counts.
+      _lat.addScaledVector(_nose, -_lat.dot(_nose));
+    }
+    const mag = _lat.length();
+    if (mag < 1e-9) {
+      _want.copy(_nose);
+      return;
+    }
+    _lat.multiplyScalar(1 / mag);
+
+    /**
+     * What the airframe can actually pull.
+     *
+     * Two limits, and taking the smaller is the whole flight model. Tipping the
+     * motor over by `asin(k)` buys `accel * k` of lateral acceleration and
+     * costs the forward component, so the airframe's ceiling is the whole
+     * motor turned nearly sideways. On top of that a seeker may only rotate its
+     * velocity vector so fast, and rotating at `turnRate` while doing `speed`
+     * needs `turnRate * speed` of centripetal acceleration.
+     *
+     * Getting this wrong is subtle and total. The first pass rate-limited the
+     * NOSE instead — lerping the heading toward the commanded one by
+     * `turnRate * dt` each frame — which sounds equivalent and is not: the
+     * commanded heading is only a couple of degrees off the current one by
+     * construction, so the lerp clipped every command to `turnRate * dt`
+     * radians of tilt, i.e. to about a sixteenth of the demand. Measured, the
+     * seeker sailed past a stationary picket at 250 metres, every time, with
+     * the guidance apparently working perfectly.
+     */
+    const maxLat = Math.min(w.accel * MAX_TILT, w.turnRate * speed);
+    const k = Math.min(saturate ? maxLat : mag, maxLat) / Math.max(w.accel, 1);
+    if (k < 1e-4) {
+      _want.copy(_nose);
+      return;
+    }
+    _want.copy(_nose).multiplyScalar(Math.sqrt(1 - k * k))
+      .addScaledVector(_lat, k).normalize();
   }
 
   // -- integration -----------------------------------------------------------
@@ -245,34 +442,38 @@ export class Ballistics {
       m.armT -= dt;
       const w = m.weapon;
 
+      // An active head does its own targeting, and keeps doing it: it looks
+      // again whenever it has nothing, whenever what it had has died, and
+      // whenever what it had has left the cone it can see through. That last
+      // case is what makes it fire-and-forget rather than fire-and-hope — a
+      // seeker that overshoots re-acquires instead of flying on forever.
+      if (w.guidance === 'active') {
+        m.scanT -= dt;
+        const lost = !m.target || m.target.disposed
+          || m.target.position.distanceTo(m.pos) > w.seeker.range;
+        if (m.scanT <= 0 && (lost || m.target.dead)) {
+          m.scanT = w.seeker.reacquire;
+          const found = this._acquire(m);
+          if (found || lost) {
+            m.target = found;
+          }
+        }
+      }
+
       const tgt = m.target && !m.target.disposed ? m.target : null;
       if (tgt) {
-        // Proportional guidance onto an intercept point rather than onto the
-        // target's current position, so it does not tail-chase.
+        // A command-guided torpedo flies at the locked subsystem; a seeker head
+        // cannot resolve one and flies at the hull.
         if (m.subsystem && tgt.sys.get(m.subsystem) && !tgt.sys.get(m.subsystem).destroyed) {
           this._modulePoint(tgt, m.subsystem, _p);
         } else {
           _p.copy(tgt.position);
         }
-        _o.copy(_p).sub(m.pos);
-        // Lead on the TARGET's motion. Using the closing velocity here — the
-        // seeker's own velocity subtracted from the target's — meant a torpedo
-        // steered by the negative of its own 500 m/s, which dragged the aim
-        // point back onto the launcher and put every shot into empty space.
-        // Against a stationary target dead ahead it missed by fifty metres and
-        // sailed on past, which is why the tubes measured as doing nothing.
-        const speed = Math.max(m.vel.length(), 40);
-        const lead = Math.min(_o.length() / speed, 4);
-        _o.addScaledVector(tgt.velocity, lead).normalize();
-        _d.copy(m.vel).normalize();
-        // Turn rate limits how fast the nose can come round.
-        const maxTurn = w.turnRate * dt;
-        const dot = Math.max(-1, Math.min(1, _d.dot(_o)));
-        const ang = Math.acos(dot);
-        if (ang > 1e-4) {
-          _d.lerp(_o, Math.min(1, maxTurn / ang)).normalize();
-        }
-        m.vel.addScaledVector(_d, w.accel * dt);
+        // `_guide` returns the bearing to point the motor along, and it has
+        // already accounted for both the turn rate and how far the airframe can
+        // be tipped — so this is the whole of the steering.
+        this._guide(m, _p, tgt.velocity);
+        m.vel.addScaledVector(_want, w.accel * dt);
       } else {
         _d.copy(m.vel).normalize();
         m.vel.addScaledVector(_d, w.accel * 0.5 * dt);
@@ -297,8 +498,11 @@ export class Ballistics {
         _d.copy(_t).multiplyScalar(1 / len);
         m.mesh.quaternion.setFromUnitVectors(FORWARD_Z, _d);
       }
-      if (Math.random() < 30 * dt) {
-        this.game.fx.smokePuff(m.pos, 0.9);
+      // The motor. Ordnance under power is one of the brightest things in the
+      // sky, and a warhead you cannot see coming is not a threat the player
+      // gets a chance to answer.
+      if (len > 1e-4) {
+        this.game.fx.motorPlume(m.pos, _d, w.guidance === 'active' ? 2 : 3, w.tracer);
       }
 
       // Contact fuse: anything solid within the swept segment sets it off.
@@ -352,7 +556,8 @@ export class Ballistics {
       if (along < 0 || along > bestT) {
         continue;
       }
-      if (_t.lengthSq() - along * along > INTERCEPT_RADIUS * INTERCEPT_RADIUS) {
+      const kill = m.weapon.interceptR || INTERCEPT_RADIUS;
+      if (_t.lengthSq() - along * along > kill * kill) {
         continue;
       }
       best = m;
@@ -553,8 +758,10 @@ export class Ballistics {
             radius: markRadius(ctx.energy) * 1.7,
             soot: 0.95, heat: 0.95, section: h.section,
           });
-          game.fx.sparkBurst(_p, _n, 30, 0xffc070);
-          game.fx.blastPlume(_p, _n, ship.velocity, markRadius(ctx.energy) * 0.9);
+          // Everything it had went off against the skin, so everything it had
+          // comes back off the skin: a hemisphere of fire standing off the
+          // plating, with pieces of that plating inside it.
+          game.fx.surfaceBlast(_p, _n, ship.velocity, blastScale(ctx.energy));
           mark(ship, 'surface', _p,
             ship.hull.sectionById[h.section].label, ctx.energy * 0.25);
           this._announce(ctx, ship, false, announced);
@@ -619,6 +826,19 @@ export class Ballistics {
             // Spall: the round punched through and threw a cone of hot plate
             // off the inner face ahead of itself.
             game.fx.spall(_p, dir, 16, 0xffb060);
+            // And a little of the hole comes back OUT of the hole. A hit that
+            // goes through throws ejecta both ways, and the backwash is what
+            // makes an entry wound read as a wound rather than as a spark.
+            //
+            // Real penetrators only. A repeater perforating a radiator a
+            // hundred times a second would otherwise own the entire debris
+            // pool inside four seconds, and the pieces that matter — the ones
+            // a wreck is made of — would be evicted by shell splinters.
+            const bs = blastScale(consumed);
+            if (bs > 1.2) {
+              game.fx.chunkBurst(_p, _n, ship.velocity, Math.round(bs), 26,
+                0.3 * bs, 0x6e757d, 0.8, 0.6);
+            }
           }
           game.audio.impact('metal', _p, 0.9);
           mark(ship, perforated ? 'wall' : 'wallStop', _p,
@@ -643,8 +863,11 @@ export class Ballistics {
             radius: markRadius(consumed) * 1.25,
             soot: 0.85, heat: 1, hole: true, section: h.section,
           });
-          game.fx.spall(_p, dir, 24, 0xffc98a);
-          game.audio.impact('metal', _p, 0.6);
+          // The far side of a through-and-through. What leaves the exit hole is
+          // the inside of everything the round crossed to get there, and it
+          // leaves at speed, along the round's own line.
+          game.fx.exitBlast(_p, dir, ship.velocity, blastScale(ctx.energy));
+          game.audio.impact('exit', _p, 0.9);
           mark(ship, 'exit', _p, ship.hull.sectionById[h.section].label, consumed);
         }
         if (E <= 0) {

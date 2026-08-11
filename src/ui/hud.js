@@ -267,10 +267,16 @@ export class HUD {
       if (live === 0) {
         state = fault || 'OFFLINE';
         cls = 'dead';
-      } else if (g.weapon.kind === 'missile' && !tgt.target) {
-        // A seeker with nothing to seek flies straight on and wastes itself.
+      } else if (g.weapon.guidance === 'command' && !tgt.target) {
+        // A command-guided torpedo with nothing to fly at wastes itself. An
+        // active seeker does not need the lock and must not be told it does —
+        // its whole point is that you can put one into empty sky in the
+        // general direction of a fight and it will find the fight.
         state = 'NO LOCK';
         cls = 'warn';
+      } else if (g.weapon.guidance === 'active') {
+        state = fault || 'FREE';
+        cls = fault ? 'warn' : '';
       } else if (tgt.target && !g.mounts.some((m) => ship.onTarget(m, tgt.target, 0.09))) {
         state = 'NO BEARING';
         cls = 'warn';

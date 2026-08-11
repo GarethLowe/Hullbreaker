@@ -110,8 +110,19 @@ function runService(m) {
 
 /** Atmosphere below this and unsuited crew start taking casualties. */
 export const ATMO_CRITICAL = 0.35;
-/** Fire needs at least this much oxygen to keep burning. */
+/** Fire needs at least this much oxygen to keep burning on the compartment's air. */
 const FIRE_MIN_ATMO = 0.14;
+/**
+ * ...or this much spilled volatile, which brings its own oxidiser and does not
+ * care that the bay is open to space. See `_tickFire`.
+ *
+ * The same figure `ignite` needs to start one, deliberately: anything with
+ * enough on the deck to catch has enough to keep burning after the compartment
+ * has vented, and any other pairing means fires that light and immediately go
+ * out — which is exactly what used to happen, because the round that started
+ * the fire was also the round that opened the bay.
+ */
+const FIRE_MIN_SPILL = 0.08;
 
 // Fire tuning. Fire is a degrader that can become a finisher only by reaching
 // something that finishes you — a magazine or a fuel tank. On its own it eats
@@ -501,6 +512,29 @@ export class Systems {
       // Every subsequent hit on an open compartment widens the hole, so a
       // compartment you keep shooting vents faster and refuses to hold air.
       s.breachSize += (joules / Math.max(s.plateMax, 1)) * 4 + 0.15;
+    }
+    // Ruptured services.
+    //
+    // Nothing aboard is empty space: hydraulic runs, coolant returns, lubricant
+    // and the compartment's own stores are threaded through every bay on the
+    // ship, and a hit that opens one puts some of that on the deck. Until this
+    // existed the ONLY source of spill was a direct hit on a fuel tank or a
+    // coolant module, so a hull could be shot to pieces without ever having a
+    // fire in it — which is exactly what it looked like from outside, and it is
+    // wrong. Fire is supposed to be the thing that turns a bad hit into a bad
+    // hour, and it cannot be if it never starts.
+    //
+    // Deliberately small. It takes a real hit to leave enough to burn, and it
+    // is bounded well below what a ruptured bunker spills.
+    const rupture = clamp01(joules / Math.max(s.plateMax, 1)) * 2.2;
+    if (rupture > 0.004) {
+      s.spill = clamp01(s.spill + Math.min(rupture, 0.25));
+      // And the ignition source arrives in the same instant. A hypervelocity
+      // impact throws incandescent spall off the back face of the plate it just
+      // crossed, into whatever has come out of the runs it cut on the way.
+      if (Math.random() < clamp01(rupture * 2)) {
+        this.ignite(sectionId, 5 + 14 * s.spill);
+      }
     }
     if (overflow > 0 && !s.frameBroken) {
       s.frameHp -= overflow * 0.55;
@@ -1151,7 +1185,21 @@ export class Systems {
       if (s.fire <= 0) {
         continue;
       }
-      if (s.atmo < FIRE_MIN_ATMO) {
+      // Vacuum smothers a fire that was burning the compartment's air. It does
+      // NOT smother a fuel or coolant spill: propellant carries its own
+      // oxidiser and a hot coolant fire in an open bay keeps going until the
+      // volatile is gone, which is precisely the case a warship is full of.
+      //
+      // This is the rule that decides whether fire exists in this game at all.
+      // With the old one, every fire went out within seconds of starting,
+      // because the same round that started it also opened the compartment and
+      // the compartment vented — so the only fires that ever burned were in
+      // sealed rooms nothing had hit. A spill fire burns in vacuum at rather
+      // less than half intensity, which is enough to be a real problem and not
+      // enough to make venting a compartment pointless. Venting still puts one
+      // out immediately, because `ventSection` says so directly.
+      const airless = s.atmo < FIRE_MIN_ATMO;
+      if (airless && s.spill < FIRE_MIN_SPILL) {
         s.fire = 0;
         this.events.push({ type: 'extinguish', section: s.id, reason: 'vacuum' });
         continue;
@@ -1162,7 +1210,8 @@ export class Systems {
         this.events.push({ type: 'extinguish', section: s.id, reason: 'fuel' });
         continue;
       }
-      const intensity = clamp01(s.fire / 3) * clamp01(s.atmo / 0.5);
+      const oxygen = Math.max(clamp01(s.atmo / 0.5), s.spill * 0.45);
+      const intensity = clamp01(s.fire / 3) * oxygen;
       s.atmo = clamp01(s.atmo - FIRE_ATMO_BURN * intensity * dt);
       s.spill = clamp01(s.spill - 0.06 * intensity * dt);
       s.temp = Math.min(900, s.temp + 120 * intensity * dt);
@@ -1210,10 +1259,19 @@ export class Systems {
     }
   }
 
-  /** Starts a fire where there is spilled fuel or coolant and air to burn it. */
+  /**
+   * Starts a fire where there is something to burn.
+   *
+   * Either air and a little spill, or enough spill that it does not need the
+   * air — the same rule `_tickFire` sustains it by. There must always be spill:
+   * a compartment full of nothing but atmosphere and steel does not catch.
+   */
   ignite(sectionId, seconds = 8) {
     const s = this.sections.get(sectionId);
-    if (!s || s.atmo < FIRE_MIN_ATMO || s.spill < 0.08) {
+    if (!s || s.spill < 0.08) {
+      return false;
+    }
+    if (s.atmo < FIRE_MIN_ATMO && s.spill < FIRE_MIN_SPILL) {
       return false;
     }
     const fresh = s.fire <= 0;

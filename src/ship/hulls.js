@@ -255,6 +255,85 @@ const battery = (id, section, o) => [
   }),
 ];
 
+/**
+ * The four long faces of a compartment, in the order a gunnery officer would
+ * list them. +X is PORT in this frame — see the sign note in flight.js.
+ */
+const PD_FACES = [
+  { key: 'D', axis: 1, sign: 1, name: 'DORSAL' },
+  { key: 'V', axis: 1, sign: -1, name: 'VENTRAL' },
+  { key: 'P', axis: 0, sign: 1, name: 'PORT' },
+  { key: 'S', axis: 0, sign: -1, name: 'STBD' },
+];
+
+/**
+ * How much sky one director covers. About 73 degrees off its rest bearing,
+ * which is what makes a ring of four on one compartment plus a second ring
+ * trained the other way add up to the whole sphere with overlap to spare.
+ */
+const PD_ARC = 1.28;
+
+/**
+ * A ring of point-defence directors: one bolted to each of a compartment's four
+ * long faces, all trained the same way down the hull.
+ *
+ * Point defence has to cover every axis or it does not cover anything. A mount
+ * cannot depress below the deck it stands on — see MOUNT_DEPRESSION, and it is
+ * a fact about barbettes rather than a simplification — so a ship carrying
+ * nothing but dorsal repeaters is completely open from underneath, and every
+ * hull here was. A torpedo run from below arrived unopposed against all four.
+ *
+ * Each mount sits at the middle of its face, half its compartment's length
+ * fore or aft, and is trained thirty degrees out from the hull and sixty along
+ * it. That bearing is not decoration: `mountFrame` picks which face a gun is
+ * bolted to by asking which one it is most nearly square to, so a director that
+ * pointed straight out of its own plating would be seated on the wrong face and
+ * would train about its own barrel.
+ *
+ * Two rings on well-separated compartments, trained opposite ways, is the
+ * standard fit below. Both halves of that matter: the sphere needs both
+ * bearings, and putting the whole suite in one compartment would mean one round
+ * through it left the ship blind to ordnance for the rest of the fight.
+ */
+const pdRing = (id, section, half, along, o) => PD_FACES.map((f) => {
+  const pos = [0, 0, along * half[2] * 0.45];
+  pos[f.axis] = f.sign * half[f.axis];
+  const dir = [0, 0, along * 0.86];
+  dir[f.axis] = f.sign * 0.5;
+  return hp_(
+    `hp_pd${id}${f.key}`,
+    `${f.name} PD ${along > 0 ? 'FWD' : 'AFT'}`,
+    section, pos,
+    {
+      weapon: 'repeater',
+      mount: 'small',
+      dir,
+      arc: PD_ARC,
+      needs: o.needs,
+      feed: o.feed,
+      draw: o.draw,
+      heat: o.heat,
+      hp: o.hp,
+    },
+  );
+});
+
+/**
+ * The ready-use locker a point-defence ring feeds from.
+ *
+ * Its own box, never the main battery's. A director cycles at 750 rpm and fires
+ * in bursts nobody schedules, so sharing a magazine with a gun that has to last
+ * the engagement means the gun runs dry for reasons its crew cannot see.
+ */
+const pdLocker = (section, pos, o) => mod('mag_pd', 'magazine', 'PD READY LOCKER',
+  section, pos, {
+    half: o.half,
+    hp: o.hp,
+    vuln: 1.5,
+    sys: 'ORDNANCE',
+    extra: { rounds: o.rounds, cookoff: o.cookoff },
+  });
+
 /** A main drive and the bunker that feeds it. */
 const driveUnit = (id, section, o) => [
   mod(`thruster_${id}`, 'thruster', `${o.label} DRIVE`, section, o.pos, {
@@ -489,9 +568,20 @@ const SABRE = {
       needs: { power: 'p.podR', data: 'd.fire', coolant: 'l.pod' },
       draw: 12, heat: 210, hp: 7.0e6,
     }),
-    hp_('hp_pd', 'POINT DEFENCE', 'spine', [0, 5.6, 2], {
-      weapon: 'repeater', mount: 'small', dir: [0, 0.3, 1], arc: 0.9,
-      needs: { power: 'p.main', data: 'd.fire' , coolant: 'l.core' }, feed: 'mag_fwd',
+    // A picket's whole defence is not being where the round is. There is no
+    // deck space for a ring and no reactor to run one, so it carries two
+    // directors and genuine blind arcs — which is the point of the class.
+    pdLocker('spine', [0, -3.2, -6], {
+      half: [1.6, 1.2, 2.2], hp: 2.2e6, rounds: 2400, cookoff: 6.0e7,
+    }),
+    hp_('hp_pd', 'DORSAL PD', 'spine', [0, 6.0, 4.5], {
+      weapon: 'repeater', mount: 'small', dir: [0, 0.5, 0.86], arc: PD_ARC,
+      needs: { power: 'p.main', data: 'd.fire' , coolant: 'l.core' }, feed: 'mag_pd',
+      draw: 2, heat: 40, hp: 4.0e6,
+    }),
+    hp_('hp_pdV', 'VENTRAL PD', 'engineering', [0, -6.0, -5.4], {
+      weapon: 'repeater', mount: 'small', dir: [0, -0.5, -0.86], arc: PD_ARC,
+      needs: { power: 'p.main', data: 'd.fire' , coolant: 'l.core' }, feed: 'mag_pd',
       draw: 2, heat: 40, hp: 4.0e6,
     }),
   ],
@@ -776,15 +866,16 @@ const HALBERD = {
       needs: { power: 'p.sponR', data: 'd.fire', coolant: 'l.spon' },
       draw: 26, heat: 380, hp: 1.1e7,
     }),
-    hp_('hp_pdA', 'POINT DEFENCE A', 'spine', [5.0, 7.5, 6], {
-      weapon: 'repeater', mount: 'small', dir: [0.3, 0.4, 1], arc: 1.1,
-      needs: { power: 'p.main', data: 'd.fire' , coolant: 'l.core' }, feed: 'mag_dor',
-      draw: 3, heat: 50, hp: 5.0e6,
+    pdLocker('spine', [0, -6.0, -8], {
+      half: [2.4, 1.8, 3.0], hp: 4.0e6, rounds: 5200, cookoff: 1.1e8,
     }),
-    hp_('hp_pdB', 'POINT DEFENCE B', 'spine', [-5.0, 7.5, 6], {
-      weapon: 'repeater', mount: 'small', dir: [-0.3, 0.4, 1], arc: 1.1,
-      needs: { power: 'p.main', data: 'd.fire' , coolant: 'l.core' }, feed: 'mag_dor',
-      draw: 3, heat: 50, hp: 5.0e6,
+    ...pdRing('F', 'spine', [10.0, 9.0, 13.0], 1, {
+      needs: { power: 'p.main', data: 'd.fire', coolant: 'l.core' },
+      feed: 'mag_pd', draw: 3, heat: 50, hp: 5.0e6,
+    }),
+    ...pdRing('A', 'coredeck', [10.0, 9.0, 13.0], -1, {
+      needs: { power: 'p.main', data: 'd.fire', coolant: 'l.core' },
+      feed: 'mag_pd', draw: 3, heat: 50, hp: 5.0e6,
     }),
     mod('mag_tor', 'magazine', 'TORPEDO STOWAGE', 'fwdhold', [0, -3.4, -6], {
       half: [3.4, 1.8, 3.0], hp: 7.0e6, vuln: 1.8, sys: 'ORDNANCE',
@@ -1266,26 +1357,25 @@ const MERIDIAN = {
       needs: { power: 'p.main', data: 'd.fireF', coolant: 'l.core' },
       draw: 60, heat: 640, hp: 2.0e7,
     }),
-    hp_('hp_pdA', 'POINT DEFENCE A', 'spine', [8.0, 11.0, -10], {
-      weapon: 'repeater', mount: 'small', dir: [0.35, 0.4, 0.6], arc: 1.2,
-      needs: { power: 'p.main', data: 'd.fireA' , coolant: 'l.core' }, feed: 'mag_fwd',
-      draw: 5, heat: 60, hp: 8.0e6,
+    hp_('hp_seek', 'SEEKER RACK', 'forehold', [0, 6.0, 11], {
+      weapon: 'seeker', mount: 'medium', dir: [0, 0.05, 1], arc: 0.30,
+      needs: { power: 'p.fwd', data: 'd.fireF', coolant: 'l.fwd' }, feed: 'mag_seek',
+      draw: 4, heat: 30, hp: 1.2e7,
     }),
-    hp_('hp_pdB', 'POINT DEFENCE B', 'spine', [-8.0, 11.0, -10], {
-      weapon: 'repeater', mount: 'small', dir: [-0.35, 0.4, 0.6], arc: 1.2,
-      needs: { power: 'p.main', data: 'd.fireA' , coolant: 'l.core' }, feed: 'mag_fwd',
-      draw: 5, heat: 60, hp: 8.0e6,
+    mod('mag_seek', 'magazine', 'SEEKER STOWAGE', 'forehold', [0, 2.0, -6], {
+      half: [4.0, 2.4, 4.0], hp: 6.0e6, vuln: 1.8, sys: 'ORDNANCE',
+      extra: { rounds: 48, cookoff: 9.0e7 },
     }),
-    // Dorsal, and it has to be able to bear. Aimed up and AFT it sat 135
-    // degrees off the bow with a 75 degree arc, so sixty degrees of sky
-    // separated it from the boresight and it could not reach anything the ship
-    // was pointing at — a gun that fired into empty space every time the
-    // repeater group was triggered. Up and FORWARD it covers the boresight
-    // with thirty degrees to spare and still sweeps back past the beam.
-    hp_('hp_pdC', 'POINT DEFENCE C', 'engineering', [0, 11.0, 14], {
-      weapon: 'repeater', mount: 'small', dir: [0, 0.6, 0.6], arc: 1.3,
-      needs: { power: 'p.main', data: 'd.fireA' , coolant: 'l.aft' }, feed: 'mag_bLA',
-      draw: 5, heat: 60, hp: 8.0e6,
+    pdLocker('coredeck', [0, -3.6, -8], {
+      half: [3.4, 2.4, 4.0], hp: 8.0e6, rounds: 9000, cookoff: 1.8e8,
+    }),
+    ...pdRing('F', 'spine', [13.5, 12, 17], 1, {
+      needs: { power: 'p.main', data: 'd.fireF', coolant: 'l.core' },
+      feed: 'mag_pd', draw: 5, heat: 60, hp: 8.0e6,
+    }),
+    ...pdRing('A', 'engineering', [14, 12, 20], -1, {
+      needs: { power: 'p.main', data: 'd.fireA', coolant: 'l.aft' },
+      feed: 'mag_pd', draw: 5, heat: 60, hp: 8.0e6,
     }),
   ],
   crew: [
@@ -1816,32 +1906,38 @@ const BASTION = {
       needs: { power: 'p.fwd', data: 'd.main', coolant: 'l.fwd' },
       draw: 150, heat: 600, hp: 3.4e7,
     }),
-    hp_('hp_pdA', 'POINT DEFENCE A', 'spine', [12, 16, -16], {
-      weapon: 'repeater', mount: 'small', dir: [0.35, 0.4, 0.6], arc: 1.2,
-      needs: { power: 'p.ring', data: 'd.main', coolant: 'l.core' }, feed: 'mag_fwd',
-      draw: 8, heat: 80, hp: 1.6e7,
+    hp_('hp_seek', 'SEEKER RACK', 'fwdhold', [0, 8, 16], {
+      weapon: 'seeker', mount: 'large', dir: [0, 0.05, 1], arc: 0.32,
+      needs: { power: 'p.fwd', data: 'd.main', coolant: 'l.fwd' }, feed: 'mag_seek',
+      draw: 8, heat: 50, hp: 2.6e7,
     }),
-    hp_('hp_pdB', 'POINT DEFENCE B', 'spine', [-12, 16, -16], {
-      weapon: 'repeater', mount: 'small', dir: [-0.35, 0.4, 0.6], arc: 1.2,
-      needs: { power: 'p.ring', data: 'd.main', coolant: 'l.core' }, feed: 'mag_fwd',
-      draw: 8, heat: 80, hp: 1.6e7,
+    mod('mag_seek', 'magazine', 'SEEKER STOWAGE', 'fwdhold', [0, 2, -8], {
+      half: [6, 3.4, 6], hp: 1.4e7, vuln: 1.8, sys: 'ORDNANCE',
+      extra: { rounds: 96, cookoff: 1.6e8 },
     }),
-    // A ready-use locker of its own, rather than sharing the port aft gun's
-    // magazine. A repeater cycles at 400 rpm and the autocannon it was sharing
-    // with at 240, so between them they emptied that box in 112 seconds while
-    // the starboard gun was still firing at 300 — the port battery went quiet
-    // three minutes early for no reason a gunner would recognise. Point
-    // defence keeps its own ammunition next to the mount on a real ship for
-    // exactly this reason: it fires in bursts nobody schedules.
-    mod('mag_pd', 'magazine', 'PD READY LOCKER', 'engineering', [0, 13, 16], {
-      half: [4, 2.4, 5], hp: 2.0e7, vuln: 1.6, sys: 'ORDNANCE',
-      extra: { rounds: 3000, cookoff: 2.4e8 },
+    // A ready-use locker of its own, rather than sharing a gun battery's
+    // magazine. A repeater cycles at 750 rpm and the autocannon it used to
+    // share with at 240, so between them they emptied that box in under two
+    // minutes while the starboard gun was still firing — the port battery went
+    // quiet three minutes early for no reason a gunner would recognise.
+    pdLocker('coredeck', [0, -4, -10], {
+      half: [5, 3.2, 6], hp: 2.0e7, rounds: 16000, cookoff: 2.4e8,
     }),
-    // Up and forward, for the reason given on the MERIDIAN's.
-    hp_('hp_pdC', 'POINT DEFENCE C', 'engineering', [0, 16, 22], {
-      weapon: 'repeater', mount: 'small', dir: [0, 0.6, 0.6], arc: 1.3,
-      needs: { power: 'p.ring', data: 'd.main', coolant: 'l.aft' }, feed: 'mag_pd',
-      draw: 8, heat: 80, hp: 1.6e7,
+    // Three rings on three widely separated compartments. A dreadnought is
+    // large enough that a single ring leaves real dead ground amidships, and
+    // heavy enough that it is going to be the thing every torpedo in the sky is
+    // pointed at.
+    ...pdRing('F', 'fwdbattery', [19, 16, 20], 1, {
+      needs: { power: 'p.fwd', data: 'd.main', coolant: 'l.fwd' },
+      feed: 'mag_pd', draw: 8, heat: 80, hp: 1.6e7,
+    }),
+    ...pdRing('M', 'spine', [20, 18, 27], -1, {
+      needs: { power: 'p.ring', data: 'd.main', coolant: 'l.core' },
+      feed: 'mag_pd', draw: 8, heat: 80, hp: 1.6e7,
+    }),
+    ...pdRing('A', 'engineering', [21, 18, 30], -1, {
+      needs: { power: 'p.ring', data: 'd.main', coolant: 'l.aft' },
+      feed: 'mag_pd', draw: 8, heat: 80, hp: 1.6e7,
     }),
   ],
   crew: [
