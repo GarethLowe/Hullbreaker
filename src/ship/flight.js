@@ -37,6 +37,37 @@ export const FORWARD = new THREE.Vector3(0, 0, 1);
 export const UP = new THREE.Vector3(0, 1, 0);
 export const STARBOARD = new THREE.Vector3(-1, 0, 0);
 
+/**
+ * Propellant drawn per second, as a fraction of a full bunker, by a drive at
+ * full duty carrying the WHOLE ship — a hull with two drives at share 0.5 pulls
+ * half this from each of its two tanks.
+ *
+ * These are fusion drives (hulls.js calls the plant a FUSION CORE), and that
+ * settles the order of magnitude rather than being flavour text. A fusion torch
+ * exhausts at something like 1e5 m/s; the fastest hull here tops out at 230 m/s
+ * and a whole engagement is a few km/s of throttling all told. Tsiolkovsky then
+ * puts the propellant cost of an entire fight in the low single-digit per cent
+ * of the tankage. Spending a bunker to fly one battle is not a balance choice,
+ * it is off by two orders of magnitude.
+ *
+ * At the old 0.30 a MERIDIAN had 667 seconds of held throttle and 370 with the
+ * boost lit. That is not a reserve, it is a fuse — and the throttle is a HELD
+ * demand (pilot.js: release W and an assisted ship brakes itself to a stop), so
+ * the player is at full duty for essentially the whole fight and burns the
+ * entire allowance. Waves are 45 s apart plus the fighting, so the tanks ran dry
+ * somewhere around wave five and the cruiser spent the rest of the run coasting:
+ * `driveAuthority` gates on `store > 0.5` and drops the drive's whole share the
+ * instant it crosses, so it is a cliff, not a taper.
+ *
+ * 0.04 gives that MERIDIAN 5000 s of held throttle, 2778 with the boost lit. A
+ * fifteen-wave run is about 1530 s of flying and costs 31% of a bunker: the
+ * gauge moves enough to be worth watching and never ends the run. What still
+ * empties a tank is being shot: a breached bunker leaks 10 units a second
+ * (systems.js `_tickThermal`), so damage outruns burn by 500x and the bunker
+ * stays a thing worth putting a round through.
+ */
+export const BURN_RATE = 0.04;
+
 export class Body {
   constructor(hull) {
     this.mass = hull.mass;
@@ -354,10 +385,11 @@ export class Autopilot {
     for (const m of sys.modules.values()) {
       if (m.kind === 'thruster') {
         m.duty = duty;
-        // Burning propellant is what actually empties the tanks.
-        const tank = sys.get(m.def.fuel);
-        if (tank && !tank.destroyed && tank.store > 0) {
-          tank.store = Math.max(0, tank.store - duty * m.def.share * 0.30 * dt);
+        // Burning propellant is what actually empties the tanks — whichever
+        // tank the transfer main can actually reach, not just this drive's own.
+        const tank = sys.fuelFor(m, 0);
+        if (tank) {
+          tank.store = Math.max(0, tank.store - duty * m.def.share * BURN_RATE * dt);
         }
       } else if (m.kind === 'rcs') {
         m.duty = clamp01(

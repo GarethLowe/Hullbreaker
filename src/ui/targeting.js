@@ -269,16 +269,7 @@ export class Targeting {
   }
 
   _modulePoint(target, moduleId, out) {
-    const def = target.hull.moduleById[moduleId];
-    if (!def) {
-      return out.copy(target.position);
-    }
-    const s = target.hull.sectionById[def.section];
-    return out.set(
-      s.pos[0] + def.pos[0] - target.hull.com[0],
-      s.pos[1] + def.pos[1] - target.hull.com[1],
-      s.pos[2] + def.pos[2] - target.hull.com[2],
-    ).applyQuaternion(target.body.quat).add(target.position);
+    return target.modulePoint(moduleId, out);
   }
 
   subsystemPoint(out = new THREE.Vector3()) {

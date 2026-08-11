@@ -8,13 +8,13 @@
 // says so in under a second.
 // -----------------------------------------------------------------------------
 import { HULLS, ENGAGEMENT_RANGE, NETS } from '../src/ship/hulls.js';
-import { Systems, ATMO_CRITICAL } from '../src/ship/systems.js';
+import { Systems, ATMO_CRITICAL, TRIP_TEMP_C, FUEL_LEAK_RATE } from '../src/ship/systems.js';
 import { Crew } from '../src/ship/crew.js';
-import { Body, Autopilot } from '../src/ship/flight.js';
+import { Body, Autopilot, BURN_RATE } from '../src/ship/flight.js';
 import { WEAPONS, AMMO, MOUNTS } from '../src/weapons/defs.js';
 import { Ballistics } from '../src/weapons/ballistics.js';
 import { Ship, MOUNT_DEPRESSION } from '../src/ship/ship.js';
-import { Pilot } from '../src/ship/ai.js';
+import { Pilot, DOCTRINE } from '../src/ship/ai.js';
 import { Euler, Quaternion, Vector3, Color } from 'three';
 import { PARTS, MUZZLES, PIVOTS } from '../src/world/kit.js';
 import {
@@ -22,6 +22,7 @@ import {
 } from '../src/world/hardware.js';
 import {
   skyColour, MOODS, Space, CAMERA_NEAR, CAMERA_FAR, STAR_SHELL, SKY_SHELL,
+  DUST_NEAR, DUST_FAR, DUST_REACH, DUST_FLOOR_PX,
 } from '../src/world/space.js';
 
 let passed = 0;
@@ -151,6 +152,59 @@ for (const [id, h] of Object.entries(HULLS)) {
   run(sys, 0.5);
   ok('coolant loop needs a POWERED pump, not just intact pipe',
     before && !sys.online.coolant.has('l.core'));
+}
+
+// --- a drained coolant loop has to come back ----------------------------------
+// `level` used to be a one-way ratchet: the drain in _tickThermal was the only
+// thing that ever wrote it, so one holed pipe cost the loop its coolant for the
+// whole run. Damage control would weld the run, the network read COOLANT 8/8,
+// and the drives on that loop kept cooking to 900 C and latching offline
+// against an empty loop sitting at ambient — a fully repaired cruiser that
+// still could not move, with nothing on any readout naming why. Walk the whole
+// cycle: sound, holed, dry and tripped, mended, recovered.
+{
+  const sys = fresh('meridian');
+  const drive = sys.get('thruster_A');
+  const loop = sys.loops.get('l.aft');
+  const hold = (seconds) => {
+    for (let t = 0; t < seconds; t += 1 / 60) {
+      // Hold the drives at full duty; flight.js does this in the real game.
+      for (const m of sys.modules.values()) {
+        if (m.kind === 'thruster') {
+          m.duty = 1;
+        }
+      }
+      sys.tick(1 / 60);
+    }
+  };
+  hold(60);
+  ok('a healthy drive loop stays full', loop.level > 0.99);
+  ok('a healthy drive runs below its trip', drive.temp < TRIP_TEMP_C,
+    `${drive.temp.toFixed(0)} C`);
+
+  const pipe = [...sys.modules.values()].find(
+    (m) => m.kind === 'conduit' && m.def.net === 'coolant' && m.def.to === 'l.aft',
+  );
+  sys.damageModule(pipe.id, pipe.maxHp * 0.95);
+  hold(90);
+  ok('a holed run empties its loop', loop.level <= 0, `${loop.level.toFixed(2)}`);
+  ok('a dry loop cooks the drive off it', drive.tripped,
+    `${drive.temp.toFixed(0)} C`);
+  // The bug, stated directly: welding the pipe is not enough on its own, and
+  // the loop must not refill while the hole is still there.
+  hold(120);
+  ok('a still-holed loop does NOT refill itself', loop.level <= 0,
+    `${loop.level.toFixed(2)}`);
+
+  sys.repairModule(pipe.id, pipe.maxHp);
+  hold(60);
+  ok('a mended loop starts taking charge again', loop.level > 0.2,
+    `${loop.level.toFixed(2)} after 60 s`);
+  hold(150);
+  ok('a mended loop comes back to full', loop.level > 0.99,
+    `${loop.level.toFixed(2)} after 210 s`);
+  ok('and the drive it cools comes back with it', !drive.tripped && drive.eff > 0.9,
+    `${drive.temp.toFixed(0)} C, eff ${drive.eff.toFixed(2)}`);
 }
 
 // --- power budget -----------------------------------------------------------
@@ -479,6 +533,349 @@ for (const [id, h] of Object.entries(HULLS)) {
     const d = i * span;
     ok(`wrap stays inside the cube at ${d.toFixed(0)}`, w(d) >= -span && w(d) < span);
   }
+}
+
+// --- the dust actually reaches the shell it is seeded into --------------------
+// The other half of the layer that lives in GLSL, and the one that was silently
+// broken. gl_PointSize is aSize * dpr * DUST_REACH / dist clamped to a floor, so
+// a mote only renders at full size within DUST_REACH * aSize metres. `size` was
+// authored as if that distance did not exist: at 0.5 the near shell reached
+// about 100 m and then ran on to 1300, so effectively every mote in it was
+// pinned to the floor AND paying the `fine` shrink on top, and the field lit a
+// third of one per cent of the frame.
+//
+// Measure it as the share of each shell that is NOT floor-pinned. A median mote
+// holds full size out to aSize * DUST_REACH / DUST_FLOOR_PX metres, the shell is
+// visible out to its span, and the frustum is a cone — so the fraction of motes
+// drawn at full size goes as the CUBE of that ratio. The old numbers scored
+// 0.3% for the near shell and 0.05% for the far one, which is the whole bug in
+// one figure. Nothing headless can render a point, but this is the arithmetic
+// the shader does, so keep the two in step.
+{
+  const fullSizeShare = (spec) => {
+    // _makeDust draws aSize as spec.size * rand(0.6, 1.5); the median is 1.05x.
+    const reach = spec.size * 1.05 * DUST_REACH / DUST_FLOOR_PX;
+    return Math.min(1, (reach / spec.span) ** 3);
+  };
+  // The near shell IS the motion cue, so most of it has to be drawn properly.
+  ok('most of the near dust shell renders at full size',
+    fullSizeShare(DUST_NEAR) > 0.35,
+    `${(fullSizeShare(DUST_NEAR) * 100).toFixed(1)}% of the shell`);
+  // The far shell is the subordinate half of the depth gradient — deliberately
+  // dimmer and sparser, so it is held to a far lower bar. Not to none, though:
+  // a gradient needs two layers you can actually see.
+  ok('the far dust shell is still visible at range',
+    fullSizeShare(DUST_FAR) > 0.04,
+    `${(fullSizeShare(DUST_FAR) * 100).toFixed(1)}% of the shell`);
+  // ...and it must stay the dimmer of the two, or there is no gradient at all.
+  ok('the far shell stays subordinate to the near one',
+    DUST_FAR.bright < DUST_NEAR.bright);
+  // Density is the other half and only `count` moves it: motes inside the
+  // frustum go as count x (span^3 / span^3), so shrinking a shell buys nothing.
+  // These are the counts measured at 2.1% frame coverage under way; well below
+  // them the layer stops reading as a field however bright each mote is.
+  ok('the near shell is dense enough to read as a field', DUST_NEAR.count >= 72000,
+    `${DUST_NEAR.count} motes`);
+  ok('the far shell still carries the depth gradient', DUST_FAR.count >= 20000,
+    `${DUST_FAR.count} motes`);
+  // The near shell must stay inside the far one, or the "gradient" is one layer.
+  ok('the near shell sits inside the far shell', DUST_NEAR.span < DUST_FAR.span);
+}
+
+// --- propellant endurance ------------------------------------------------------
+// The throttle is a HELD demand — release W under assist and the ship brakes
+// itself to a stop (pilot.js) — so a player is at full duty for essentially the
+// whole fight, and endurance at duty 1 is the real number rather than a worst
+// case. At the old 0.30 that was 667 s for a MERIDIAN, waves are 45 s apart plus
+// the fighting, and the cruiser ran dry around wave five and coasted the rest of
+// the run. These are fusion drives; a fight should cost a slice of a bunker, not
+// the bunker.
+{
+  // Endurance is set by the FIRST tank to empty, not by the total tankage:
+  // driveAuthority drops a drive's whole share the moment its own tank crosses
+  // store > 0.5, so a hull is only as good as its shortest-lived bunker.
+  for (const [id, hull] of Object.entries(HULLS)) {
+    const drives = hull.modules.filter((m) => m.kind === 'thruster');
+    const endurance = (duty) => Math.min(...drives.map((d) => {
+      const tank = hull.moduleById[d.fuel];
+      return tank.store / (duty * d.share * BURN_RATE);
+    }));
+    // A fifteen-wave run is about 1530 s of held throttle. Nothing should run
+    // dry inside that from flying alone, boost included. The SABRE is the
+    // binding case and clears it by only a few per cent, deliberately: one
+    // drive drawing on one bunker is half the tankage of every other hull, so
+    // it is the picket that decides how low the burn rate is allowed to go.
+    ok(`${id}: outlasts a long run on held throttle`, endurance(1) > 2400,
+      `${endurance(1).toFixed(0)} s`);
+    ok(`${id}: outlasts a fight with the boost lit`, endurance(1.8) > 1300,
+      `${endurance(1.8).toFixed(0)} s`);
+    // ...but a bunker is still worth shooting. A breach has to dwarf the burn,
+    // or battle damage stops mattering and the tank is just scenery.
+    for (const d of drives) {
+      const tank = hull.moduleById[d.fuel];
+      const leak = tank.leak * FUEL_LEAK_RATE;
+      ok(`${id}: ${tank.id} empties far faster breached than burning`,
+        leak > 5 * d.share * BURN_RATE,
+        `leak ${leak.toFixed(2)}/s vs burn ${(d.share * BURN_RATE).toFixed(3)}/s`);
+      // And the other side of it: a breach must be a job the damage-control
+      // parties can actually win. At the old rate a bunker emptied in eight
+      // seconds — less time than it takes a party to cross a compartment — so
+      // the repair path that clears `leakRate` above 60% health could never
+      // once be reached in time. Two minutes is a fight for it; ten is a
+      // formality.
+      const seconds = tank.store / leak;
+      ok(`${id}: ${tank.id} gives the parties a chance to patch it`,
+        seconds > 120 && seconds < 600, `${seconds.toFixed(0)} s to empty`);
+    }
+  }
+}
+
+// --- ready lockers and the main magazine ---------------------------------------
+// A gun's whole ammunition outfit used to sit in a box at the mount, and mounts
+// are outboard by construction — `magPos` puts them in the battery compartments,
+// the thinnest-armoured parts of every hull. One detonation on the outside of a
+// HALBERD took 55% of its rounds with it, and 19% of a MERIDIAN's. The lockers
+// now hold READY_SECONDS of fire and the rest is deep in the hull.
+{
+  for (const [id, hull] of Object.entries(HULLS)) {
+    const mags = hull.modules.filter((m) => m.kind === 'magazine');
+    const total = mags.reduce((a, m) => a + m.rounds, 0);
+    for (const m of mags) {
+      if (!m.deep) {
+        continue;   // torpedo stowage, the PD locker, and the whole SABRE
+      }
+      // A locker is defined by being small. Three per cent is the bar: above it
+      // the thing at the mount is a magazine again whatever it is labelled.
+      ok(`${id}: ${m.id} is a locker, not a magazine`,
+        (100 * m.rounds / total) < 3,
+        `${(100 * m.rounds / total).toFixed(1)}% of ${total} rounds`);
+      // Sized off the weapon, so it means the same on every gun.
+      const gun = hull.modules.find((h) => h.kind === 'hardpoint' && h.feed === m.id);
+      const w = WEAPONS[gun.weapon];
+      const seconds = m.rounds / ((w.ammo || 1) / w.interval);
+      ok(`${id}: ${m.id} holds a sane burst`, seconds > 20 && seconds <= 50,
+        `${seconds.toFixed(0)} s of fire`);
+      // And letting go at the mount must not be the same event as letting go
+      // in the magazine deck.
+      const deep = hull.moduleById[m.deep];
+      ok(`${id}: ${m.id} cooks off far smaller than ${m.deep}`,
+        m.cookoff * 5 < deep.cookoff,
+        `${m.cookoff.toExponential(1)} vs ${deep.cookoff.toExponential(1)}`);
+    }
+  }
+  // The SABRE is deliberately left whole: a 95 m picket has no compartment that
+  // is not an outside compartment, so there is nowhere deeper to put anything.
+  ok('the picket keeps its single magazine',
+    HULLS.sabre.modules.filter((m) => m.kind === 'magazine')
+      .every((m) => !m.deep && m.rounds > 100));
+}
+{
+  // The hoist is the gun's power run, so cutting it takes the mount's training
+  // and its ammunition supply together: it fires out its locker and then stops,
+  // and the rounds it never got stay safe in the magazine.
+  const sys = fresh('meridian');
+  const locker = sys.get('mag_bLA');
+  const main = sys.get('mag_main');
+  const rate = WEAPONS[HULLS.meridian.moduleById.hp_bLA.weapon].ammo
+    / WEAPONS[HULLS.meridian.moduleById.hp_bLA.weapon].interval;
+  const fire = (seconds) => {
+    for (let t = 0; t < seconds; t += 1 / 60) {
+      sys.tick(1 / 60);
+      locker.rounds = Math.max(0, locker.rounds - rate / 60);
+    }
+  };
+  run(sys, 1);
+  ok('a locker starts full', locker.rounds === locker.def.rounds);
+
+  fire(200);
+  ok('sustained fire outruns the hoist', locker.rounds < locker.def.rounds * 0.05,
+    `${locker.rounds.toFixed(0)} left`);
+  ok('...but the magazine kept it shooting', main.rounds < main.def.rounds,
+    `${main.rounds.toFixed(0)} of ${main.def.rounds}`);
+  run(sys, 90);
+  ok('a quiet gun refills from the magazine', locker.rounds > locker.def.rounds * 0.99,
+    `${locker.rounds.toFixed(0)}`);
+
+  sys.damageModule('c_hoist_bLA', 1e12);
+  run(sys, 1);
+  const held = main.rounds;
+  fire(60);
+  ok('a cut hoist starves the gun', locker.rounds <= 0, `${locker.rounds.toFixed(0)}`);
+  run(sys, 90);
+  ok('...and no ceasefire brings it back', locker.rounds <= 0,
+    `${locker.rounds.toFixed(0)}`);
+  ok('...while the rounds it never got stay in the magazine',
+    Math.abs(main.rounds - held) < 1e-6);
+}
+
+// --- a loop with TWO feeds, one of them merely dented ---------------------------
+// Reported from a real game: `l.batA 0% leak=0 flow=1` — nothing leaking, coolant
+// circulating, and the loop stuck empty for the rest of the run. l.batA is fed by
+// both l_batA and the l_tie_bat cross-connect, and the first version of the refill
+// refused to charge a loop while ANY run into it sat under the repair threshold.
+// The network disagreed: it happily flows through a dented pipe. So a tie nobody
+// had got round to welding held the whole loop dry while every readout said the
+// cooling was fine.
+{
+  const sys = fresh('meridian');
+  const loop = sys.loops.get('l.batA');
+  run(sys, 1);
+
+  // The cross-connect takes a knock and is left damaged but still carrying.
+  // Set directly rather than via damageModule: conduits carry a 2.4x
+  // vulnerability multiplier, so "half its health in joules" destroys one, and
+  // the state being reproduced here is specifically a run that SURVIVED.
+  sys.get('l_tie_bat').hp = sys.get('l_tie_bat').maxHp * 0.5;
+  // The main run is holed and bleeds the loop dry.
+  sys.damageModule('l_batA', sys.get('l_batA').maxHp * 0.95);
+  run(sys, 120);
+  ok('a holed run still empties the loop', loop.level <= 0, `${loop.level.toFixed(2)}`);
+
+  // The parties weld the run they were sent to. The tie is still dented.
+  sys.repairModule('l_batA', sys.get('l_batA').maxHp);
+  run(sys, 2);
+  const tie = sys.get('l_tie_bat');
+  ok('the reported state is reproduced: no leak, flow, dented tie',
+    loop.leak <= 0 && (sys.online.coolant.get('l.batA') || 0) > 0
+    && tie.hp < tie.maxHp && !tie.destroyed,
+    `leak=${loop.leak} flow=${sys.online.coolant.get('l.batA')} tie=${(tie.hp / tie.maxHp).toFixed(2)}`);
+  run(sys, 200);
+  ok('a dented tie does not hold the loop dry', loop.level > 0.99,
+    `${loop.level.toFixed(2)} after 200 s`);
+}
+
+// --- one holed bunker must not cost half the thrust forever ---------------------
+// Each drive was hard-wired to `def.fuel`, so a round through one tank left that
+// drive dead while its sister tank sat full. Warships run a transfer main.
+{
+  const sys = fresh('meridian');
+  run(sys, 1);
+  ok('a healthy ship has full drive authority', sys.driveAuthority() > 0.99);
+  sys.get('fuel_A').store = 0;
+  run(sys, 1);
+  ok('a dry bunker still leaves both drives fed', sys.driveAuthority() > 0.99,
+    `authority ${sys.driveAuthority().toFixed(2)} with fuel_A empty`);
+  ok('...drawing from the tank that still has some',
+    sys.fuelFor(sys.get('thruster_A'), 0.5) === sys.get('fuel_B'));
+  // Both dry is still both dry: the transfer main is not a fuel source.
+  sys.get('fuel_B').store = 0;
+  run(sys, 1);
+  ok('an empty ship still does not move', sys.driveAuthority() < 0.05);
+}
+
+// --- the tender between waves --------------------------------------------------
+// Repair gives back health. Propellant, hands and rounds are SPENT rather than
+// broken, and nothing put any of them back, so a run only ever decayed — a ship
+// that lost both bunkers was adrift for the rest of the game with a full crew,
+// full stores and nothing wrong with it.
+{
+  const hull = HULLS.meridian;
+  const sys = new Systems(hull);
+  const crew = new Crew(hull, sys);
+  const ship = Object.create(Ship.prototype);
+  ship.sys = sys;
+  ship.crew = crew;
+
+  const rounds = () => [...sys.modules.values()]
+    .filter((m) => m.kind === 'magazine').reduce((a, m) => a + m.rounds, 0);
+  const capacity = [...sys.modules.values()]
+    .filter((m) => m.kind === 'magazine').reduce((a, m) => a + m.def.rounds, 0);
+
+  sys.get('fuel_A').store = 0;
+  sys.get('fuel_B').store = 12;
+  for (const m of sys.modules.values()) {
+    if (m.kind === 'magazine') {
+      m.rounds = 0;
+    }
+  }
+  crew.parties.forEach((q) => { q.size = 0; });
+  crew._recount();
+  ok('the wreck is properly spent', sys.fuelFraction() < 0.1 && crew.headcount === 0);
+
+  const hands = ship.resupply();
+  ok('a tender fills the bunkers', sys.fuelFraction() > 0.99,
+    `${Math.round(sys.fuelFraction() * 100)}%`);
+  ok('...and it can move again', sys.driveAuthority() > 0.99);
+  ok('ammunition comes back a tenth at a time',
+    Math.abs(rounds() - capacity * 0.10) < 1, `${Math.round(rounds())} of ${capacity}`);
+  ok('hands come back a quarter at a time',
+    Math.abs(hands - crew.complementMax * 0.25) < 2, `${hands} of ${crew.complementMax}`);
+  ok('...spread across the billets, not dumped in one',
+    crew.parties.every((q) => q.size > 0 && q.size <= q.max));
+  ok('...and a wiped-out party comes back at its own station',
+    crew.parties.every((q) => q.at === q.station && !q.task));
+
+  // Nine more lulls must not overfill anything.
+  for (let i = 0; i < 9; i++) {
+    ship.resupply();
+  }
+  ok('repeated resupply never overfills a magazine',
+    [...sys.modules.values()].filter((m) => m.kind === 'magazine')
+      .every((m) => m.rounds <= m.def.rounds + 1e-9));
+  ok('repeated resupply never overfills a billet',
+    crew.parties.every((q) => q.size <= q.max + 1e-9));
+  ok('...and the ship does come back to full complement',
+    crew.headcount === crew.complementMax, `${crew.headcount}/${crew.complementMax}`);
+  // A destroyed bunker has nothing to fill until the crew rebuild it.
+  sys.damageModule('fuel_A', 1e12);
+  sys.get('fuel_A').store = 0;
+  ship.resupply();
+  ok('a destroyed bunker is not refuelled by a tender',
+    sys.get('fuel_A').store === 0);
+}
+
+// --- gunnery doctrine ----------------------------------------------------------
+// Every ship used to lay on the target's centre of mass, so a whole wave put its
+// output through one compartment — on the cruisers and up, the engineering deck.
+// Aim points are now chosen by the SHOOTER's role. Two ways that regresses
+// silently: a hull whose role is not in the table (it reverts to centre mass and
+// nobody notices), and a doctrine with nothing to shoot at on some hull (same
+// result, one matchup at a time). Neither shows up as an error at runtime.
+{
+  const roles = new Set(Object.values(HULLS).map((h) => h.role));
+  for (const role of roles) {
+    ok(`${role} has a gunnery doctrine`, !!DOCTRINE[role],
+      `roles: ${[...roles].join(', ')}`);
+  }
+  // Conduits are excluded by _pickAim — wiring is threaded through the whole
+  // ship rather than being a place on it — so they must not count here either.
+  const carries = (hull, sys) => hull.modules.some(
+    (m) => m.kind !== 'conduit' && m.sys === sys,
+  );
+  for (const want of new Set(Object.values(DOCTRINE))) {
+    for (const [id, hull] of Object.entries(HULLS)) {
+      ok(`${id} has ${want} worth shooting at`, carries(hull, want));
+    }
+  }
+}
+
+// --- a module's world position -------------------------------------------------
+// modulePoint is what both the player's targeting computer and the enemy's fire
+// control aim through, and it undoes two nested frames plus the centre-of-mass
+// shift. worldToHull is the documented inverse, so make them agree — a sign slip
+// in either aims every gun in the game at a mirror image of the right place.
+{
+  const ship = Object.create(Ship.prototype);
+  ship.hull = HULLS.meridian;
+  ship.body = { quat: new Quaternion().setFromEuler(new Euler(0.3, -1.1, 0.7)), pos: new Vector3(120, -40, 900) };
+  const back = new Vector3();
+  for (const id of ['reactor', 'thruster_A', 'mag_fwd', 'bridge_comp', 'sensor']) {
+    if (!ship.hull.moduleById[id]) {
+      continue;
+    }
+    const def = ship.hull.moduleById[id];
+    const sec = ship.hull.sectionById[def.section];
+    ship.worldToHull(ship.modulePoint(id), back);
+    const wantX = sec.pos[0] + def.pos[0];
+    const wantY = sec.pos[1] + def.pos[1];
+    const wantZ = sec.pos[2] + def.pos[2];
+    const err = Math.hypot(back.x - wantX, back.y - wantY, back.z - wantZ);
+    ok(`modulePoint round-trips for ${id}`, err < 1e-6, `${err.toExponential(2)} m`);
+  }
+  // An id that is not on this hull must give the hull centre, never undefined —
+  // a caller holding a stale module would otherwise aim at NaN.
+  ok('modulePoint survives an unknown module',
+    ship.modulePoint('no_such_module').distanceTo(ship.position) < 1e-9);
 }
 
 // --- shield facet attribution ------------------------------------------------

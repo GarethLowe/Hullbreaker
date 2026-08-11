@@ -25,7 +25,7 @@
 // Nothing here touches Three.js. It is pure state, so it can be reasoned about
 // on its own and the diagnostics UI can read it directly.
 // -----------------------------------------------------------------------------
-import { NETS, FACETS, MATERIALS } from './hulls.js';
+import { NETS, FACETS, MATERIALS, HOIST_FILL_SECONDS } from './hulls.js';
 import { clamp, clamp01, lerp } from '../core/mathx.js';
 
 export const LEVEL = { OK: 'ok', WARN: 'warn', CRIT: 'crit', DEAD: 'dead' };
@@ -40,6 +40,74 @@ export const DERATE_TEMP_C = 95;
 export const TRIP_TEMP_C = 155;
 /** Junction temperature at which the ship computer latches off permanently. */
 const COMPUTER_LATCH_C = 128;
+
+/**
+ * How sound a coolant run has to be before its loop will hold pressure. The
+ * same threshold `repairModule` uses to stop the leak, named here because two
+ * places now depend on agreeing about when a pipe counts as mended.
+ */
+const COOLANT_TIGHT_FRAC = 0.6;
+/**
+ * Fraction of a loop's charge the pumps put back per second, at full flow.
+ *
+ * 1/140th: a loop drained to nothing comes back over about two and a half
+ * minutes, which is three wave gaps. That is deliberately slower than the
+ * welding — losing your coolant should be a wound you nurse across a couple of
+ * engagements, not a thing the crew undoes the moment they finish the pipe —
+ * and it is far slower than the seconds a dry loop takes to cook a drive, so
+ * the recovery is something the player watches happen. Coupling scales with
+ * `level`, so a half-full loop is genuinely half a cooling system: the drives
+ * come back off their trip late in the charge rather than the moment it starts.
+ *
+ * The reserve behind it is unmodelled and effectively infinite. A make-up tank
+ * with a finite charge would be the honest version and is the obvious upgrade
+ * if coolant ever needs to be a resource the player manages; today nothing
+ * else in the ship treats it as one.
+ */
+const LOOP_RECHARGE = 1 / 140;
+
+/**
+ * Bunker units lost per second, per unit of `leak`, through a breached tank.
+ *
+ * A fusion drive carries very little reaction mass for what it does — that is
+ * the whole point of the exhaust velocity — so a bunker is a small, dense,
+ * heavily-boxed thing rather than a chemical tanker's wing full of kerosene.
+ * At the old 100 a breach emptied a tank in eight to fourteen SECONDS: two
+ * hundred and fifty times the burn rate, faster than a damage-control party
+ * can cross a compartment, and with no decision anywhere in it. The crew's own
+ * repair path clears `leakRate` the moment the tank is above 60% health, and
+ * they were never once given the chance to use it.
+ *
+ * At 4 the same breach takes three and a half to six minutes. That is still an
+ * order of magnitude above the burn — a holed bunker is unambiguously why you
+ * are losing fuel, never the flying — but it is now a job on the board that a
+ * party can be sent to and can win. Losing propellant should cost you a repair
+ * you had to prioritise, not a coin flip you never saw.
+ */
+export const FUEL_LEAK_RATE = 4;
+/**
+ * How fast a punctured bunker closes itself, in `leak` units per second.
+ *
+ * Self-sealing tanks are eighty-year-old technology on aircraft — a bladder
+ * whose inner layer swells shut around a hole — and a warship carrying reaction
+ * mass through gunfire is the obvious place for the idea to have kept going.
+ * Mechanically it is what turns a breach from a countdown into a decision: the
+ * tank will close on its own in about two minutes and you will lose roughly a
+ * quarter of what was in it, OR you send a party and lose almost none. Damage
+ * control is still strictly better and still worth prioritising; it is no
+ * longer the difference between a working ship and a hulk.
+ */
+export const FUEL_SELF_SEAL = 0.12 / 120;
+/**
+ * Cryogenic boil-off, in bunker units per second, always.
+ *
+ * A tenth of what one drive draws at full throttle, so it can never be the
+ * reason you are short — over a twenty-five minute run it is about three per
+ * cent — but a hull left drifting for an hour is not quite as full as it was.
+ * Reaction mass is not a number in a box; it is a cold thing in a tank, and it
+ * is trying to leave.
+ */
+export const FUEL_BOIL_OFF = 0.002;
 
 /** Speed air leaves a hull breach at, m/s. Sets how fast a compartment vents. */
 const EXHAUST_SPEED = 260;
@@ -811,7 +879,8 @@ export class Systems {
     }
     const applied = Math.min(joules, m.maxHp - m.hp);
     m.hp += applied;
-    if (m.kind === 'conduit' && m.def.net === 'coolant' && m.hp > m.maxHp * 0.6) {
+    if (m.kind === 'conduit' && m.def.net === 'coolant'
+      && m.hp > m.maxHp * COOLANT_TIGHT_FRAC) {
       const loop = this.loops.get(m.def.to);
       if (loop) {
         loop.leak = 0;
@@ -897,6 +966,7 @@ export class Systems {
     this._tickAtmosphere(dt);
     this._tickFire(dt);
     this._tickThermal(dt);
+    this._tickHoists(dt);
     this._tickModules(dt);
     this._tickShields(dt);
     this._tickArcing(dt);
@@ -1228,14 +1298,23 @@ export class Systems {
   _tickThermal(dt) {
     // Fuel leaks pool as spill (and drain the tank), which is what a fire eats.
     for (const m of this.modules.values()) {
-      if (m.kind === 'fuel' && m.leakRate > 0 && m.store > 0) {
-        const lost = Math.min(m.store, m.leakRate * 100 * dt);
+      if (m.kind !== 'fuel' || m.destroyed || m.store <= 0) {
+        continue;
+      }
+      if (m.leakRate > 0) {
+        const lost = Math.min(m.store, m.leakRate * FUEL_LEAK_RATE * dt);
         m.store -= lost;
         const s = this.sections.get(m.section);
         if (s) {
           s.spill = clamp01(s.spill + m.leakRate * 0.6 * dt);
         }
+        // The bladder swells shut around the hole. A party still beats it by a
+        // wide margin — `repairModule` zeroes this outright above 60% health —
+        // but an unattended breach now stops instead of running the tank dry.
+        m.leakRate = Math.max(0, m.leakRate - FUEL_SELF_SEAL * dt);
       }
+      // Boil-off. Small, and it never stops.
+      m.store = Math.max(0, m.store - FUEL_BOIL_OFF * dt);
     }
 
     for (const loop of this.loops.values()) {
@@ -1243,9 +1322,32 @@ export class Systems {
         loop.level = clamp01(loop.level - loop.leak * dt);
         if (loop.level <= 0) {
           loop.level = 0;
-          loop.leak = 0;
+          // `leak` is deliberately NOT cleared here. It is the one flag that
+          // says "there is still a hole in this", and `repairModule` is the
+          // only thing entitled to clear it. Zeroing it on empty made a dry
+          // loop and a mended one indistinguishable, which is what forced the
+          // refill below to go asking the conduits instead — and that test
+          // disagreed with the network: a dented-but-flowing run reported
+          // `flow: 1` and carried coolant while still counting as holed, so
+          // the loop sat at 0% for the rest of the run with nothing leaking
+          // and everything circulating. The event still fires exactly once,
+          // because the branch needs `level > 0` to run at all.
           this.events.push({ type: 'dryLoop', loop: loop.id });
         }
+      } else if (loop.leak <= 0 && loop.level < 1) {
+        // Charge a mended loop back up off the ship's make-up reserve. Without
+        // this `level` was a one-way ratchet — the only writes anywhere were
+        // the drain above — so one holed pipe cost a loop its coolant for the
+        // rest of the run. The crew would dutifully weld the run, the network
+        // read COOLANT 8/8, and the drives on that loop went on cooking to 700
+        // degrees and latching offline against a loop sitting empty at ambient,
+        // with nothing on any readout naming the reason.
+        //
+        // Gated on circulation rather than on the pipe: a loop fills through
+        // its own pump, so a dead pump leaves it dry however much reserve is
+        // aboard, and a run cut badly enough to stop flow stops the top-up too.
+        const flow = this.online.coolant.get(loop.id) || 0;
+        loop.level = clamp01(loop.level + LOOP_RECHARGE * flow * dt);
       }
       loop.heatIn = 0;
     }
@@ -1322,6 +1424,42 @@ export class Systems {
         // An empty loop carries nothing; it just sheds to the hull.
         loop.temp = lerp(loop.temp, AMBIENT_C, 1 - Math.exp(-0.7 * dt));
       }
+    }
+  }
+
+  /**
+   * Rounds up from the main magazine into the ready-use lockers at the mounts.
+   *
+   * The lockers hold well under a minute of fire each; everything else is deep
+   * in the hull. What makes that a mechanic rather than bookkeeping is where it
+   * can be interrupted — the hoist is the gun's power run, so one cut takes the
+   * mount's training and its supply together and the gun fires until its locker
+   * is empty and then stops. Losing the main magazine does the same thing to
+   * every gun at once, slowly.
+   */
+  _tickHoists(dt) {
+    for (const m of this.modules.values()) {
+      if (m.kind !== 'magazine' || !m.def.deep || m.destroyed) {
+        continue;
+      }
+      const want = m.def.rounds - m.rounds;
+      if (want <= 0) {
+        continue;
+      }
+      const deep = this.modules.get(m.def.deep);
+      if (!deep || deep.destroyed || deep.rounds <= 0) {
+        continue;
+      }
+      // A partly-served bus lifts proportionally slower, same as everything
+      // else on the run: a hoist on an emergency tie is a hoist on half power.
+      const up = m.def.hoist ? (this.online.power.get(m.def.hoist) || 0) : 1;
+      if (up <= 0) {
+        continue;
+      }
+      const lift = Math.min(want, deep.rounds,
+        (m.def.rounds / HOIST_FILL_SECONDS) * up * dt);
+      m.rounds += lift;
+      deep.rounds -= lift;
     }
   }
 
@@ -1641,6 +1779,29 @@ export class Systems {
     return false;
   }
 
+  /**
+   * The bunker a drive can actually draw from: its own if it still holds
+   * anything, otherwise any other bunker aboard that does.
+   *
+   * Warships run a transfer main between their bunkers, and without one modelled
+   * here a single round through one tank cost a hull half its thrust for the
+   * rest of the run while the other tank sat full — the drive was hard-wired to
+   * `def.fuel` and nothing ever looked past it. A drive is fed by the ship, not
+   * by one box.
+   */
+  fuelFor(drive, min = 0) {
+    const own = this.modules.get(drive.def.fuel);
+    if (own && !own.destroyed && own.store > min) {
+      return own;
+    }
+    for (const m of this.modules.values()) {
+      if (m.kind === 'fuel' && !m.destroyed && m.store > min) {
+        return m;
+      }
+    }
+    return null;
+  }
+
   /** 0..1 main drive authority, weighted by each drive's share of the total. */
   driveAuthority() {
     let acc = 0;
@@ -1649,8 +1810,7 @@ export class Systems {
       if (m.kind !== 'thruster') {
         continue;
       }
-      const tank = this.modules.get(m.def.fuel);
-      const fuelOk = tank && !tank.destroyed && tank.store > 0.5 ? 1 : 0;
+      const fuelOk = this.fuelFor(m, 0.5) ? 1 : 0;
       acc += m.eff * fuelOk * m.def.share;
       share += m.def.share;
     }

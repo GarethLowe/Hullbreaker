@@ -200,6 +200,40 @@ export class Crew {
   }
 
   /**
+   * Replacements aboard, as a fraction of the ship's rated complement.
+   *
+   * Spread across the billets in proportion to how short each one is, so the
+   * division that was gutted gets the draft and the one that came through
+   * untouched gets none of it. A party that was wiped out entirely comes back
+   * at its own station rather than wherever its last hands died.
+   *
+   * Returns the number actually taken on, which is less than asked for once
+   * the ship is nearly full.
+   */
+  draft(fraction) {
+    const short = this.parties.filter((q) => q.size < q.max);
+    const total = short.reduce((a, q) => a + (q.max - q.size), 0);
+    if (total <= 0) {
+      return 0;
+    }
+    const budget = Math.min(total, this.complementMax * fraction);
+    for (const q of short) {
+      const wasEmpty = q.size <= 0;
+      // Each share is at most that billet's own shortfall, because `budget`
+      // never exceeds `total` — so this cannot overfill a party.
+      q.size += budget * ((q.max - q.size) / total);
+      if (wasEmpty) {
+        q.at = q.station;
+        q.heading = null;
+        q.path = [];
+        q.task = null;
+      }
+    }
+    this._recount();
+    return budget;
+  }
+
+  /**
    * 0..1 quality of a manned station. Used by the flight model and the gunnery:
    * an empty bridge means the ship handles like the autopilot it is left with.
    */

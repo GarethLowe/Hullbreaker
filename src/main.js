@@ -19,6 +19,7 @@
 import * as THREE from 'three';
 import { ECS } from './core/ecs.js';
 import { Input } from './core/input.js';
+import { Trace } from './core/trace.js';
 import { AudioEngine } from './core/audio.js';
 import { Assets } from './world/assets.js';
 import { Space, CAMERA_NEAR, CAMERA_FAR } from './world/space.js';
@@ -105,6 +106,8 @@ class Game {
     this.assets = new Assets(this.renderer);
     this.fx = new FX(this);
     this.space = new Space(this);
+    /** Flight recorder. Off until `game.trace.start()`; see core/trace.js. */
+    this.trace = new Trace(this);
     this.ballistics = new Ballistics(this);
     this.hud = new HUD(this);
     this.targeting = new Targeting(this);
@@ -259,7 +262,12 @@ class Game {
       }
       if (this.player && !this.player.ship.disposed) {
         const p = this.player.ship;
-        p.updateWeapons(dt, this.targeting.target, this.player._fire);
+        // Lay on the selected subsystem if there is one. The targeting computer
+        // has been able to pick a module since it was written, but the point
+        // only ever reached the HUD pip — the guns went on shooting centre mass,
+        // so choosing a target's reactor drew a marker and changed nothing.
+        p.updateWeapons(dt, this.targeting.target, this.player._fire,
+          this.targeting.subsystemPoint(_v));
       }
     }, 20);
 
@@ -312,6 +320,12 @@ class Game {
     ecs.addSystem('director', ({ dt }) => {
       this._director(dt);
     }, 80);
+
+    // Last in the step, so a sample is the settled state of the tick rather
+    // than a half-updated one. Costs nothing until `game.trace.start()`.
+    ecs.addSystem('trace', ({ dt }) => {
+      this.trace.tick(dt);
+    }, 90);
   }
 
   /** Which compartment of `ship` is closest to a world point. */
@@ -429,6 +443,13 @@ class Game {
         // into every wave carrying all the damage from the last one, which is
         // most of why the difficulty curve felt like a cliff.
         this.waveTimer = 45;
+        // A tender came alongside during the lull. Repair gives back health;
+        // this gives back the things that are spent rather than broken, without
+        // which a run only ever decays — see `Ship.resupply`.
+        if (this.player && !this.player.ship.disposed) {
+          const hands = this.player.ship.resupply();
+          this.hud.warn(hands > 0 ? `RESUPPLIED — ${hands} HANDS ABOARD` : 'RESUPPLIED');
+        }
         this._spawnWave();
       }
     }

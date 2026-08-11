@@ -27,6 +27,9 @@ const BEAM_SWAP = 0.55;
 const _local = new THREE.Vector3();
 const _lead = new THREE.Vector3();
 const _qi = new THREE.Quaternion();
+/** Held across the whole gunnery call, so it cannot share with `_aimScan`. */
+const _aim = new THREE.Vector3();
+const _aimScan = new THREE.Vector3();
 
 export const AI_STATE = {
   PATROL: 'PATROL',
@@ -47,6 +50,38 @@ const DISENGAGE_RANGE = ENGAGEMENT_RANGE * 1.3;
 const WEAPONS_FREE = ENGAGEMENT_RANGE * 1.5;
 /** And how long it is willing to spend running before it gives up on that. */
 const WITHDRAW_LIMIT = 22;
+
+/**
+ * What each hull shoots AT, by the system it tries to break first.
+ *
+ * Every ship in the game used to lay on the target's centre of mass, which is
+ * the one point every attacker agrees on — so a four-contact wave put its
+ * entire output through whichever compartment happened to hold the centroid,
+ * and on the cruisers and up that is the engineering deck. The player spent
+ * every lull welding the same two hundred square metres while the rest of the
+ * ship came through untouched, and the interiors this game is mostly ABOUT
+ * never got hit.
+ *
+ * Splitting it by the SHOOTER's role rather than randomising is what makes the
+ * spread mean something. A mixed wave now arrives with a mixed intent: the
+ * pickets go for the drives because a picket's whole game is choosing the
+ * range and it cannot let you leave, the frigates go for the guns, and the
+ * heavies go for the plant. Damage lands all over the hull because the ships
+ * shooting at you want different things, not because a random number moved it.
+ *
+ * Random scatter would also have spread the damage, and it is the wrong answer:
+ * it makes every hit less meaningful rather than more, and it cannot be tested
+ * for anything except its own variance. This is deterministic — given a bearing
+ * and a target, a hull picks the same aim point every time.
+ */
+export const DOCTRINE = {
+  PICKET: 'PROPULSION',
+  'LINE FRIGATE': 'ORDNANCE',
+  'HEAVY CRUISER': 'POWER',
+  DREADNOUGHT: 'POWER',
+};
+/** How often a shooter re-picks its aim point as the geometry changes. */
+const AIM_REVIEW = 2.5;
 
 export class Pilot {
   constructor(ship, game) {
@@ -71,6 +106,9 @@ export class Pilot {
     this.triggers = [false, false];
     /** Which shoulder is offered to the target; latched, see `_steer`. */
     this.beamSide = 0;
+    /** The module this ship is trying to break, and when to reconsider it. */
+    this.aimModule = null;
+    this.aimT = 0;
     this._shouldFire = (m) => this.triggers[
       (m.turret || m.weapon.kind === 'missile') ? 1 : 0
     ];
@@ -114,7 +152,60 @@ export class Pilot {
     }
 
     // Fixed mounts fire on trigger 0, self-aiming mounts on trigger 1.
-    ship.updateWeapons(dt, this.target, this._shouldFire);
+    ship.updateWeapons(dt, this.target, this._shouldFire, this._gunAim(dt, _aim));
+  }
+
+  /**
+   * Where this ship's guns are laid: the doctrine module if it can pick one,
+   * the hull centre otherwise.
+   *
+   * Which module of the preferred system it goes for is decided by geometry —
+   * the one nearest the shooter, so it is aiming at the part of the target it
+   * can actually see. That is what keeps a wing from stacking up on one point
+   * even when two of them share a doctrine: two pickets on opposite beams
+   * choose opposite drives, because each one's nearest is the other's far side.
+   *
+   * Aiming needs a firing solution, so it needs the sensor picture. A ship down
+   * to a stale contact does not get to pick a subsystem — it is shooting at a
+   * memory of a hull, and the memory does not have parts.
+   */
+  _gunAim(dt, out) {
+    const target = this.target;
+    if (!target || this.lastSeenAge > 0.4) {
+      this.aimModule = null;
+      return null;
+    }
+    this.aimT -= dt;
+    const chosen = this.aimModule && target.sys.get(this.aimModule);
+    if (this.aimT <= 0 || !chosen || chosen.destroyed) {
+      this.aimT = AIM_REVIEW;
+      this.aimModule = this._pickAim(target);
+    }
+    return this.aimModule ? target.modulePoint(this.aimModule, out) : null;
+  }
+
+  /** Nearest live module of this hull's preferred system, or nothing. */
+  _pickAim(target) {
+    const want = DOCTRINE[this.ship.hull.role];
+    if (!want) {
+      return null;
+    }
+    let best = null;
+    let bestD = Infinity;
+    for (const m of target.sys.modules.values()) {
+      // Conduits are wiring threaded through the whole ship rather than a place
+      // on it, and they are already the thing a stray round cuts. Aim at the
+      // machinery; severing the run that feeds it is a bonus, not a plan.
+      if (m.destroyed || m.kind === 'conduit' || m.def.sys !== want) {
+        continue;
+      }
+      const d = target.modulePoint(m.id, _aimScan).distanceToSquared(this.ship.position);
+      if (d < bestD) {
+        bestD = d;
+        best = m.id;
+      }
+    }
+    return best;
   }
 
   /** Sensor-gated target acquisition. Bad sensors mean a stale, noisy picture. */

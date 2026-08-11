@@ -219,41 +219,100 @@ const tie = (id, net, from, to, section, pos, o = {}) => cond(
 );
 
 /**
- * A gun battery as a fitting rather than three loose parts: the mount, the
- * magazine that feeds it, and the hoist that ties it to a power node. Every
- * warship here carries several, and hand-placing the pieces one at a time is
- * exactly how a magazine ends up wired to the wrong bus.
+ * Seconds of fire a ready-use locker holds, at the gun's maximum rate.
+ *
+ * A gun's ammunition used to live entirely in a box at the mount, and those
+ * boxes are out on the beam by construction — `magPos` sits in the battery
+ * compartments, which are the thinnest-armoured and most-shot-at parts of every
+ * hull. That put 55% of a HALBERD's rounds and 19% of a MERIDIAN's behind one
+ * plate each: a single detonation on the outside of the ship deleted a third to
+ * a half of its ammunition, which is not how anyone has ever stowed ordnance.
+ * A warship keeps minutes of fire at the gun and the rest of the outfit deep in
+ * the hull, and moves it up as it is used. The BASTION's point-defence fitting
+ * was already called a READY LOCKER; this makes the rest of the ship agree.
+ *
+ * Derived from the weapon rather than authored per battery, so it means the
+ * same thing on every gun: 45 seconds is 45 railgun rounds, 180 autocannon or
+ * 300 repeater. Every magazine in the game currently holds between 400 and 3200
+ * SECONDS of fire, so this takes nothing away from a fight that lasts two
+ * minutes — what it changes is what one lucky hit on a beam battery costs.
+ *
+ * It is also what makes the hoist worth shooting. Cut the run and the gun keeps
+ * firing out of its locker for three quarters of a minute, then stops.
  */
-const battery = (id, section, o) => [
-  mod(`mag_${id}`, 'magazine', `${o.label} MAGAZINE`, section, o.magPos, {
-    half: o.magHalf,
-    hp: o.magHp,
-    vuln: 1.7,
-    sys: 'ORDNANCE',
-    extra: { rounds: o.rounds, cookoff: o.cookoff },
-  }),
-  // `p.gun_` and not `p.${id}`: the forward battery's id is 'fwd', which
-  // collided with the ship's own forward bus and made its hoist a run from
-  // p.fwd to p.fwd. A self-loop supplies nothing, so on all four hulls the
-  // main battery was the one gun whose feed could not be cut, while every
-  // broadside died to a single round through its hoist. `sole` marks it as a
-  // deliberate single point of failure — a gun is allowed to have exactly one
-  // feed, which is what makes shooting the hoist worth doing.
-  cond(`c_hoist_${id}`, 'power', o.from, `p.gun_${id}`, section, o.hoistPos, {
-    label: `${o.label} HOIST`, hp: o.hoistHp, sole: true,
-  }),
-  hp_(`hp_${id}`, o.label, section, o.gunPos, {
-    weapon: o.weapon,
-    mount: o.mount || 'large',
-    dir: o.dir,
-    arc: o.arc,
-    needs: { power: `p.gun_${id}`, data: o.data, ...(o.cool ? { coolant: o.cool } : {}) },
-    feed: `mag_${id}`,
-    draw: o.draw,
-    heat: o.heat,
-    hp: o.gunHp,
-  }),
-];
+const READY_SECONDS = 45;
+/**
+ * Seconds for the hoist to fill an empty locker. Longer than the locker holds,
+ * so a gun held at its maximum rate slowly outruns its own supply and settles
+ * to whatever the hoist can lift — a detail that costs nothing to model here
+ * and is the reason sustained fire and burst fire are different things.
+ */
+export const HOIST_FILL_SECONDS = 60;
+/** Rounds a locker holds for a given weapon: READY_SECONDS at its top rate. */
+const readyRounds = (weapon) => {
+  const w = WEAPONS[weapon];
+  return Math.max(1, Math.round(READY_SECONDS * (w.ammo || 1) / w.interval));
+};
+
+/**
+ * A gun battery as a fitting rather than four loose parts: the mount, the
+ * ready-use locker that feeds it, the hoist that ties it to a power node, and
+ * the main magazine it draws from. Every warship here carries several, and
+ * hand-placing the pieces one at a time is exactly how a magazine ends up wired
+ * to the wrong bus.
+ *
+ * `deep` names the hull's main magazine and defaults to it, because a hull that
+ * has one wants every battery drawing on it. Pass `deep: null` for a ship too
+ * small to have somewhere deeper to put the rounds — see the SABRE, whose
+ * "interior" is one compartment thick in every direction.
+ */
+const battery = (id, section, o) => {
+  const deep = o.deep === undefined ? 'mag_main' : o.deep;
+  const ready = deep ? Math.min(o.rounds, readyRounds(o.weapon)) : o.rounds;
+  return [
+    mod(`mag_${id}`, 'magazine', `${o.label} ${deep ? 'READY LOCKER' : 'MAGAZINE'}`,
+      section, o.magPos, {
+        half: o.magHalf,
+        hp: o.magHp,
+        vuln: 1.7,
+        sys: 'ORDNANCE',
+        extra: {
+          rounds: ready,
+          // `cookoff` is the energy of a FULL module — systems.js scales it by
+          // how full the thing actually is when it goes — so it has to come
+          // down with the rounds. A locker letting go at the mount should
+          // wreck the mount, not the ship.
+          cookoff: o.cookoff * (ready / o.rounds),
+          deep,
+          // Rounds come up the same run that powers the gun, so the hoist is
+          // one thing to cut rather than two: lose it and the mount loses its
+          // training and its supply together.
+          hoist: deep ? `p.gun_${id}` : null,
+        },
+      }),
+    // `p.gun_` and not `p.${id}`: the forward battery's id is 'fwd', which
+    // collided with the ship's own forward bus and made its hoist a run from
+    // p.fwd to p.fwd. A self-loop supplies nothing, so on all four hulls the
+    // main battery was the one gun whose feed could not be cut, while every
+    // broadside died to a single round through its hoist. `sole` marks it as a
+    // deliberate single point of failure — a gun is allowed to have exactly one
+    // feed, which is what makes shooting the hoist worth doing.
+    cond(`c_hoist_${id}`, 'power', o.from, `p.gun_${id}`, section, o.hoistPos, {
+      label: `${o.label} HOIST`, hp: o.hoistHp, sole: true,
+    }),
+    hp_(`hp_${id}`, o.label, section, o.gunPos, {
+      weapon: o.weapon,
+      mount: o.mount || 'large',
+      dir: o.dir,
+      arc: o.arc,
+      needs: { power: `p.gun_${id}`, data: o.data, ...(o.cool ? { coolant: o.cool } : {}) },
+      feed: `mag_${id}`,
+      draw: o.draw,
+      heat: o.heat,
+      hp: o.gunHp,
+    }),
+  ];
+};
 
 /** A main drive and the bunker that feeds it. */
 const driveUnit = (id, section, o) => [
@@ -472,6 +531,10 @@ const SABRE = {
 
     ...battery('fwd', 'prow', {
       label: 'PROW DRIVER', weapon: 'railgun', mount: 'medium',
+      // No main magazine, and no split: a picket ninety-five metres long has
+      // nowhere deeper to put the rounds than where they already are. Every
+      // compartment on this hull is an outside compartment.
+      deep: null,
       magPos: [0, -1.2, -1.0], magHalf: [2.4, 1.4, 3.0], magHp: 5.0e6,
       rounds: 320, cookoff: 4.5e7,
       hoistPos: [2.6, -0.4, -2], hoistHp: 1.1e6,
@@ -789,6 +852,14 @@ const HALBERD = {
     mod('mag_tor', 'magazine', 'TORPEDO STOWAGE', 'fwdhold', [0, -3.4, -6], {
       half: [3.4, 1.8, 3.0], hp: 7.0e6, vuln: 1.8, sys: 'ORDNANCE',
       extra: { rounds: 24, cookoff: 1.8e8 },
+    }),
+    // Everything the gun batteries do not have at the mount. The frigate has no
+    // dedicated magazine deck, so it goes in the core deck: heavy plate, on the
+    // centreline, with a compartment between it and the sky on every bearing.
+    // 1510 rounds is exactly what came out of the two beam lockers.
+    mod('mag_main', 'magazine', 'MAIN MAGAZINE', 'coredeck', [0, -4.0, 0], {
+      half: [6.0, 3.0, 8.0], hp: 4.0e7, vuln: 1.5, sys: 'ORDNANCE',
+      extra: { rounds: 1510, cookoff: 3.5e8 },
     }),
     hp_('hp_tor', 'TORPEDO TUBES', 'fwdhold', [0, -5.4, 8], {
       weapon: 'torpedo', mount: 'large', dir: [0, -0.05, 1], arc: 0.20,
@@ -1198,6 +1269,21 @@ const MERIDIAN = {
     mod('mag_tor', 'magazine', 'TORPEDO STOWAGE', 'magdeck', [0, 0, 0], {
       half: [8.0, 3.0, 7.0], hp: 2.2e7, vuln: 1.8, sys: 'ORDNANCE',
       extra: { rounds: 60, cookoff: 9.0e8 },
+    }),
+    // The gun outfit, less what is up at the mounts: 12925 rounds, against the
+    // 570 now sitting in the nine ready lockers. The magazine deck is where it
+    // belongs — armorHeavy, on the centreline, seven metres below the spine and
+    // shielded on every bearing by another compartment. Getting at it means
+    // going through the ship rather than through a beam battery.
+    //
+    // The cookoff is deliberately NOT the sum of what the lockers used to carry.
+    // A magazine is subdivided and flash-tight; the whole outfit does not go at
+    // once, or no ship that ever took a hit here would have survived to be
+    // written about. 1.5e9 makes it the worst thing on the hull by two thirds
+    // and still short of arithmetic.
+    mod('mag_main', 'magazine', 'MAIN MAGAZINE', 'magdeck', [0, 0, -10], {
+      half: [10.0, 3.5, 3.5], hp: 9.0e7, vuln: 1.5, sys: 'ORDNANCE',
+      extra: { rounds: 12925, cookoff: 1.5e9 },
     }),
     // A second driver in each wing. A broadside ship that can only bring two
     // guns and a lance to bear is not a broadside ship, it is a nose-fighter
@@ -1796,6 +1882,16 @@ const BASTION = {
       half: [12, 5, 11], hp: 5.0e7, vuln: 1.8, sys: 'ORDNANCE',
       extra: { rounds: 120, cookoff: 2.4e9 },
     }),
+    // 16385 rounds, everything the nine gun batteries are not holding at the
+    // mount. Same reasoning as the cruiser's, one deck bigger: the shelter-deck
+    // lockers at [±13, -8, 0] and the spine pair up at [±14, 11, 12] were the
+    // most exposed ammunition on any hull in the game — outboard, high, and on
+    // a dreadnought whose whole design assumption is that the beam is where it
+    // gets hit.
+    mod('mag_main', 'magazine', 'MAIN MAGAZINE', 'magdeck', [0, 0, -16], {
+      half: [14, 5, 5], hp: 1.6e8, vuln: 1.5, sys: 'ORDNANCE',
+      extra: { rounds: 16385, cookoff: 3.5e9 },
+    }),
     // Wide-training turrets instead of a second broadside.
     //
     // Eight more drivers were fitted here to give the dreadnought a broadside
@@ -2154,6 +2250,14 @@ function validate(spec) {
     }
     if (m.fuel && !ids.has(m.fuel)) {
       throw new Error(`${spec.id}: thruster "${m.id}" draws from missing tank "${m.fuel}"`);
+    }
+    // `battery()` points every locker at 'mag_main' unless told otherwise, so a
+    // hull that grows a battery without growing a main magazine would quietly
+    // ship guns that fire forty-five seconds and never refill. Catch it here,
+    // where a typo is a thrown error at load rather than a dry gun at minute
+    // nine of a fight.
+    if (m.deep && !ids.has(m.deep)) {
+      throw new Error(`${spec.id}: locker "${m.id}" draws from missing magazine "${m.deep}"`);
     }
   }
   for (const c of spec.crew) {

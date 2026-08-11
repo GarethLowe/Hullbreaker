@@ -86,6 +86,16 @@ export const MOUNT_DEPRESSION = 0.09;
  */
 const BEAR_TOL = 0.026;
 const BEAR_COS = Math.cos(BEAR_TOL);
+
+/**
+ * What a tender puts back between waves. See `Ship.resupply`.
+ *
+ * Fuel is not here because it fills: the deliberate asymmetry is that the thing
+ * which is cheap to replace is the thing the ship cannot fight without, while
+ * hands and rounds trickle back and stay a reason to husband them.
+ */
+const RESUPPLY_CREW = 0.25;
+const RESUPPLY_AMMO = 0.10;
 /** Scratch for that clamp; `_aimMount` is holding most of the others. */
 const _mnt = new THREE.Vector3();
 const _mntT = new THREE.Vector3();
@@ -578,6 +588,62 @@ export class Ship {
   }
 
   /**
+   * What the lull between waves is worth: a tender comes alongside.
+   *
+   * The wave gap already existed so the damage-control parties could achieve
+   * something, but repair only ever gave back HEALTH. Three things are consumed
+   * rather than damaged, and nothing anywhere put any of them back — so a run
+   * decayed in one direction only, and a ship that lost both bunkers to a lucky
+   * pair of hits was adrift for the rest of the game with a full crew, full
+   * stores and nothing wrong with it.
+   *
+   * Propellant fills: a bunker is small (see FUEL_LEAK_RATE) and topping one up
+   * alongside is an hour's work, not a refit. Hands and ammunition come back at
+   * a fraction, because replacements are people a tender actually has to have
+   * brought with it and a magazine is thousands of rounds struck down by hand.
+   * A destroyed bunker or magazine gets nothing: there is no vessel there to
+   * fill until the crew have rebuilt it.
+   */
+  resupply() {
+    for (const m of this.sys.modules.values()) {
+      if (m.destroyed) {
+        continue;
+      }
+      if (m.kind === 'fuel') {
+        m.store = m.def.store;
+      } else if (m.kind === 'magazine') {
+        m.rounds = Math.min(m.def.rounds, m.rounds + m.def.rounds * RESUPPLY_AMMO);
+      }
+    }
+    const hands = this.crew ? this.crew.draft(RESUPPLY_CREW) : 0;
+    return Math.round(hands);
+  }
+
+  /**
+   * Where a named module actually is, in the world. The inverse of
+   * `worldToHull`: module positions are authored relative to their compartment
+   * and compartments relative to the raw hull frame, so both hops and the
+   * centre-of-mass shift have to be undone before the body rotation goes on.
+   *
+   * This is the point anything aiming at a SUBSYSTEM needs — the targeting
+   * computer and the enemy's fire control both — so it lives on the ship rather
+   * than in either of them. Falls back to the hull centre for an id that is not
+   * on this hull, so a caller holding a stale module can never aim at nothing.
+   */
+  modulePoint(moduleId, out = new THREE.Vector3()) {
+    const def = this.hull.moduleById[moduleId];
+    if (!def) {
+      return out.copy(this.position);
+    }
+    const s = this.hull.sectionById[def.section];
+    return out.set(
+      s.pos[0] + def.pos[0] - this.hull.com[0],
+      s.pos[1] + def.pos[1] - this.hull.com[1],
+      s.pos[2] + def.pos[2] - this.hull.com[2],
+    ).applyQuaternion(this.body.quat).add(this.position);
+  }
+
+  /**
    * World point into RAW hull-table coordinates — the frame the tables are
    * authored in and the frame the cutaway draws in, which is the body frame
    * shifted back by the centre of mass. Meshes are placed COM-relative so the
@@ -933,7 +999,7 @@ export class Ship {
    * other mount threw its rounds off into open space at an angle. The mounts
    * could always traverse; nothing was ever asking them to.
    */
-  _aimMount(mount, target, dt) {
+  _aimMount(mount, target, dt, aimAt) {
     const rest = _v.copy(mount.rest).applyQuaternion(this.body.quat);
     const laid = mount.traverses && this.sys.hasData(mount.mod);
     if (!laid) {
@@ -950,7 +1016,14 @@ export class Ship {
       this.forward(_v2);
     } else {
       this.localToWorld(mount.origin, _o);
-      _v2.copy(target.position).sub(_o);
+      // The aim point, not the target's origin. Every gun in the game used to
+      // lay on `target.position` — the centre of mass — so a whole wave
+      // converged on one compartment and the player spent every lull welding
+      // the same engineering deck, while the targeting computer's subsystem
+      // selection moved the HUD pip and nothing else. `aimAt` is where fire
+      // control has actually been told to put the rounds; the hull centre is
+      // only the default.
+      _v2.copy(aimAt || target.position).sub(_o);
       if (w.muzzleVel) {
         _d.copy(target.velocity).sub(this.velocity);
         const t = interceptTime(_v2, _d, w.muzzleVel);
@@ -1159,7 +1232,7 @@ export class Ship {
    * arbitrary weapons to the two mouse buttons while the AI keeps thinking in
    * fixed-versus-turret terms — both drive identical gunnery code.
    */
-  updateWeapons(dt, target, shouldFire) {
+  updateWeapons(dt, target, shouldFire, aimAt = null) {
     const ball = this.game.ballistics;
     {
       for (const mount of this.mounts) {
@@ -1169,7 +1242,7 @@ export class Ship {
           continue;
         }
         const held = shouldFire(mount);
-        this._aimMount(mount, target, dt);
+        this._aimMount(mount, target, dt, aimAt);
         const w = mount.weapon;
         const mod = mount.mod;
         const live = mod.eff > 0.12 && !mod.destroyed;

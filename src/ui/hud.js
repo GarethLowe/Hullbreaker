@@ -297,7 +297,10 @@ export class HUD {
       }
       this._set(this.el.ammo, 'html',
         `<b style="color:${a.tracer ? `#${a.tracer.toString(16).padStart(6, '0')}` : '#fff'}">`
-        + `${a.short}</b> ${a.name}<span class="rounds">${rounds}</span>`);
+        // Floored, not raw: the hoist lifts rounds continuously, so a locker
+        // part-way through a lift holds a fraction of one and the ammunition
+        // counter is not the place to show it.
+        + `${a.short}</b> ${a.name}<span class="rounds">${Math.floor(rounds)}</span>`);
     } else {
       this._set(this.el.ammo, 'html', '<span class="rounds">ENERGY ONLY</span>');
     }

@@ -30,6 +30,16 @@ import { rand, clamp, smoothstep } from '../core/mathx.js';
 import { ENGAGEMENT_RANGE } from '../ship/hulls.js';
 
 /**
+ * How far a mote of unit `size` stays at full size: `gl_PointSize` is
+ * `aSize * dpr * DUST_REACH / dist`, clamped into DUST_FLOOR_PX..3.5. Exported
+ * because the size ladder below is only correct in relation to it, and the
+ * selfcheck holds the two together — see `size` there.
+ */
+export const DUST_REACH = 700;
+/** Size floor, in device px. Below it a radial profile scintillates. */
+export const DUST_FLOOR_PX = 2.0;
+
+/**
  * Half-extents of the two dust cubes. Motes wrap when they leave them.
  *
  * `bright` overdrives past 1.0 on purpose. A mote is two or three pixels of
@@ -39,9 +49,35 @@ import { ENGAGEMENT_RANGE } from '../ship/hulls.js';
  * was there, but you had to know to look for it. The headroom goes into the
  * bright tail rather than the floor, so the field gains contrast instead of
  * turning into grey haze.
+ *
+ * `size` and `count` are the two that were wrong, and raising `bright` could
+ * never have fixed either. Measured by rendering the frame twice, motes in and
+ * motes out, and differencing: at 0.5/24000 the layer lit 0.31% of the frame at
+ * cruise and moved the median lit pixel by FOUR levels out of 255 over a sky at
+ * 37. That is not a dim dust field, it is no dust field.
+ *
+ * Both terms failed for the same reason, which is `size` rather than `count`:
+ * at 0.5 a mote hit full size only within about 100 m, and the near shell runs
+ * to 1300, so effectively the entire field sat pinned at the DUST_FLOOR_PX
+ * floor paying the `fine` shrink penalty on top. Nearly every mote was the
+ * dimmest, smallest thing the shader can draw. 2.8 puts a median mote at full
+ * size all the way out to where its own radial fade starts, which is what the
+ * clamp ceiling is there to make safe — nothing gets blobbier, the field just
+ * stops being uniformly starved.
+ *
+ * Shrinking the spans instead does NOT work, and it is worth writing down: the
+ * motes inside the frustum go as count x (span^3 / span^3), so a tighter cube
+ * buys density and loses exactly as much visible volume. Measured, span 1300 ->
+ * 520 moved coverage 0.31% -> 0.37%. Only `count` moves coverage.
+ *
+ * Together: 2.11% of the frame lit at cruise against 0.31%, median lit pixel 7
+ * against 4, 90th percentile 71 against 32. Cost is nil — these are 2-3.5 px
+ * points with an early discard, and the layer measured under 0.1 ms of a frame
+ * at 124k motes. At a standstill the speed gate still holds the median lit
+ * pixel at 2 levels, so a parked ship sees stars and nothing else.
  */
-const DUST_NEAR = { span: 1300, count: 24000, size: 0.5, bright: 2.1 };
-const DUST_FAR = { span: 5200, count: 8000, size: 1.1, bright: 1.05 };
+export const DUST_NEAR = { span: 1300, count: 96000, size: 2.8, bright: 2.1 };
+export const DUST_FAR = { span: 5200, count: 28000, size: 6.0, bright: 1.05 };
 
 const STAR_COUNT = 2200;
 
@@ -452,13 +488,13 @@ export class Space {
           // off the canopy became a forty-pixel soft blob, which is most of
           // what "blobby" meant. 3.5 px is the ceiling now: past that a mote
           // stops reading as a speck of grit and starts reading as an object.
-          float raw = aSize * uPixelRatio * 700.0 / dist;
-          gl_PointSize = clamp(raw, 2.0, 3.5);
-          // Below the 2 px floor a radial profile scintillates violently as it
+          float raw = aSize * uPixelRatio * ${DUST_REACH.toFixed(1)} / dist;
+          gl_PointSize = clamp(raw, ${DUST_FLOOR_PX.toFixed(1)}, 3.5);
+          // Below the floor a radial profile scintillates violently as it
           // crawls across the pixel grid, so hold the size there and spend the
           // remaining shrink on alpha instead. sqrt keeps the deep field
           // populated rather than collapsing to a handful of near motes.
-          float fine = sqrt(min(1.0, raw * 0.5));
+          float fine = sqrt(min(1.0, raw / ${DUST_FLOOR_PX.toFixed(1)}));
           // Fade in from the near plane so motes do not pop into existence
           // bright, and out at the shell edge so the cube has no visible wall.
           float near = smoothstep(0.0, 90.0, dist);
