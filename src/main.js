@@ -171,6 +171,9 @@ class Game {
     // Everything the game will ever draw, compiled and uploaded before the
     // first real frame rather than the first time each thing is needed.
     this.assets.warmUp(this.scene, this.camera, this.hulls);
+    // The blast-front spheres are parked visible-but-empty so that pass
+    // compiles their program too; put them away now it has.
+    this.fx.clear();
     this.last = performance.now();
     requestAnimationFrame(() => this._frame());
   }
@@ -411,14 +414,21 @@ class Game {
       if (s.dead) {
         s.deadT += dt;
         // A dying hull tumbles, burns and comes apart — it does not blink out.
-        if (Math.random() < 7 * dt) {
+        // The secondaries walk down the hull as compartment after compartment
+        // goes, each one throwing its own pieces clear.
+        if (Math.random() < 3.5 * dt) {
           s.sectionWorld(pick(s.hull.sectionIds), _v);
-          this.fx.explosion(_v, rand(12, 34), 0xff9a50);
+          this.fx.explosion(_v, rand(10, 26), 0xff9a50, { vel: s.body.vel });
+          this.audio.boom(_v, 0.7);
         }
         if (s.deadT > 6.5) {
-          this.fx.explosion(s.position, s.hull.radius * 1.4, 0xffd090);
-          this.fx.debris(s.position, s.body.vel, 140, s.hull.tint);
-          this.audio.boom(s.position, 1.5);
+          // The hull comes apart into pieces that stay in the sky. They are
+          // culled by whether the player can still see them, not by a timer —
+          // see CHUNK_CULL_DIST in fx.js — so a wreck is a debris field you can
+          // fly back through rather than something that evaporates the moment
+          // it stops being convenient.
+          this.fx.shipBreakup(s);
+          this.audio.reactor(s.position, 1.4);
           this.ecs.destroy(s.entity);
         }
       } else if (s.faction === 'hostile' && !s.derelict) {
@@ -481,7 +491,13 @@ class Game {
   explode(pos, opts) {
     const radius = opts.radius;
     const energy = opts.energy;
-    this.fx.explosion(pos, radius, opts.incendiary ? 0xffa050 : 0xffc070);
+    // `radius` is the range at which the blast stops being able to hurt
+    // anything, which is several times the size of the fireball that did the
+    // hurting. Drawing the fireball at the cull radius would put a 180 m ball
+    // of fire around a torpedo warhead.
+    this.fx.explosion(pos, radius * 0.35,
+      opts.incendiary ? 0xffa050 : 0xffc070,
+      { heavy: radius > 120 });
     this.audio.boom(pos, clamp01(radius / 24));
     for (const s of this.ships) {
       if (s.disposed) {

@@ -363,13 +363,24 @@ instrumentation rather than by reading:
 
 #### Point defence lays itself
 
-A repeater is a director and a fast tracker whose entire job is killing
-warheads, and it has to react quicker than any trigger a person is holding. It
-leaves the player's selectable groups and the AI's triggers altogether and
-engages inbound torpedoes on its own inside 2.6 km — and nothing else, because
-every second spent shooting at a belt is a second with no defence against the one
-weapon that opens three compartments at once. Three torpedoes inbound, no
-triggers touched: all three killed, hull and shields untouched.
+A repeater is a director and a fast tracker whose entire job is killing things
+already on their way, and it has to react quicker than any trigger a person is
+holding. It leaves the player's selectable groups and the AI's triggers
+altogether and lays itself: inbound ordnance out to 2.2 km, and — once nothing
+is inbound — any hull inside 3 km. Ordnance always wins the argument; a mount
+tracking a ship drops it the instant a warhead enters its arc.
+
+The two bands differ because the gun does. It throws a 5 mrad cone: at three
+kilometres that is fifteen metres of scatter, which is a hit on a hull and a
+wasted magazine against a three-metre warhead. A director holds its fire on
+ordnance until the solution is worth the ammunition.
+
+Every ring feeds from its own ready-use locker, never a gun battery's. A
+director cycles at 520 rpm in bursts nobody schedules, and sharing a magazine
+with a weapon that has to last the engagement means that weapon runs dry for
+reasons its crew cannot see.
+
+See **A ring, not a roof** below for what the mounts cover.
 
 #### Sensors, fitted rather than dropped on the centreline
 
@@ -493,6 +504,175 @@ Ordnance is excluded from arcing now. Six hundred trials, no cook-offs, worst
 hull loss 0.0000. Fire still reaches magazines — `ignite` is untouched, so a
 burning compartment cooks off through the thermal model, where the crew get a
 chance to fight it.
+
+#### A ring, not a roof
+
+A mount cannot depress below the deck it is bolted to — five degrees, which is
+about what a real barbette allows before the breech fouls its own ring. That is
+a fact about machines, and it means a ship carrying nothing but dorsal repeaters
+is *completely open from underneath*. Every hull here was. A torpedo run from
+below arrived unopposed against all four.
+
+Point defence is now fitted as rings: one director on each of a compartment's
+four long faces, trained thirty degrees out from the hull and sixty along it,
+with a second ring on a well-separated compartment trained the other way. Eight
+bearings cover the whole sphere with overlap to spare, and splitting them across
+two compartments means one round through a spine does not leave the ship blind.
+
+| | directors | sky covered |
+|-|-|-|
+| **SABRE** | 2 | 55% |
+| **HALBERD** | 8 | 100% |
+| **MERIDIAN** | 8 | 100% |
+| **BASTION** | 12 | 100% |
+
+The picket is the deliberate exception: no deck space for a ring, no plant to
+run one, and real blind arcs. That is the class.
+
+The bearing is not decoration. `mountFrame` picks which face a gun is bolted to
+by asking which one it is most nearly *square* to, so a director authored to
+point straight out of its own plating gets seated on the wrong face and trains
+about its own barrel.
+
+#### Directors track one thing each
+
+Every mount picking the nearest warhead meant a ring of eight stacked on the
+leader of a salvo while the rest arrived untouched. A second director now joins
+a warhead another is already on only when the next threat out is more than 900 m
+further away, so salvos split the battery and a lone torpedo gets all of it.
+
+Getting this wrong the first way was instructive: folding the doubling-up
+penalty into the *range* budget rather than using it to rank candidates meant
+the fourth director to look at a lone torpedo scored it 2700 m past where it
+actually was, decided it was out of reach, and went off to shoot at the ship. A
+ring of eight engaged with three and everything got through.
+
+What the fit is worth, measured. A HALBERD with all eight directors up shot down
+seventy seekers and nine torpedoes for nothing through. With its directors
+wrecked, the same frigate took every torpedo fired at it, lost half its plate and
+finished with eight compartments open. **A complete ring beats ordnance, and the
+answer to one is to break it** — the cutaway shows you where the mounts are. A
+BASTION leaks about half the seekers thrown at it even with all twelve up,
+because a 380 m hull cannot bring three rings to bear on one bearing.
+
+#### Seekers steer by sight-line rate, not by prediction
+
+The old guidance was lead pursuit: work out where the target will be, point at
+it, repeat. That is stable against a stationary target and hopeless against a
+manoeuvring one, because the aim point moves every frame and the seeker spends
+its whole turn budget chasing an error it re-creates.
+
+Proportional navigation steers to null the *rotation* of the line of sight. If
+the bearing to the target is not changing, the two are on a collision course
+whatever either is doing — so a seeker on a good intercept flies almost straight
+and has its entire turn rate left for the moment the target breaks. Four lines
+of vector algebra, and it is what every real missile since the 1950s uses.
+
+It is also easy to implement in a way that looks right and misses every time.
+The first pass rate-limited the *nose*, lerping the heading toward the commanded
+one by `turnRate * dt` each frame. That sounds equivalent and is not: the
+commanded heading is only a couple of degrees off the current one by
+construction, so the lerp clipped every command to about a sixteenth of the
+demand. Measured, the seeker sailed past a stationary picket at 250 metres,
+every single time, with the guidance apparently working perfectly. The turn
+limit belongs on the *velocity vector* — `min(accel × maxTilt, turnRate × speed)`
+of lateral acceleration — and `selfcheck` now asserts miss distances rather than
+trusting that the maths looks correct.
+
+#### The seeker rack
+
+A new ordnance class, because a torpedo cannot answer a ring of directors.
+
+| | mass | speed | turn | warhead | guidance |
+|-|-|-|-|-|-|
+| TORPEDO TUBES | 4,000 kg | 620 m/s | 0.34 rad/s | 450 MJ | command, tracks the locked *subsystem* |
+| SEEKER RACK | 260 kg | 1,400 m/s | 1.07 rad/s | 65 MJ | active, finds its own target |
+
+The head runs two channels and the difference between them is the character of
+the weapon. **Infrared** scores a contact by how hot it is — drives at burn, a
+reactor under load, fires aboard — so it will leave a cold dreadnought coasting
+and chase a picket that just lit its engines. **Optical** scores by angular size,
+so it takes the biggest thing in frame, cannot be dimmed by shutting anything
+down, and cannot tell a wreck from a warship. Whichever gives the stronger return
+wins, and the head looks again whenever it loses what it had.
+
+Both racks ripple. A single warhead against a full ring is a donation, so the
+tubes empty at two-second intervals and the rack at four rounds a second — a
+dozen in the air inside the time one of them takes to cross three kilometres,
+which is more than a ring can lay on at once.
+
+Toughness is per-weapon and it is not body size, it is how much of a near miss
+the thing does not survive. A seeker is a thin-skinned 260 kg vehicle carrying a
+lens: anything within 6 m ends it. A torpedo is four tonnes with structure around
+the warhead and wants very nearly a direct hit at 3 m.
+
+#### Four layers make an explosion
+
+The old one was a spray of orange dots and a light. An explosion needs all four
+of these or it reads as a puff:
+
+- **flash** — the light it throws on everything around it
+- **wave** — the fireball as a real expanding volume that thins into a shell
+- **particle** — incandescent gas, embers, and smoke
+- **chunk** — lit, tumbling, solid pieces of the thing that came apart
+
+Two of those needed new machinery. Fragments are an `InstancedMesh` of jittered
+icosahedra — one draw call for every piece of debris in the world, each tumbling
+under its own angular velocity. Blast fronts are a small pool of shader spheres
+that start opaque and boil, then thin to a luminous rim.
+
+Smoke got its own pool, and the reason is worth writing down: it is the only
+thing here that has to make the scene *darker*. Everything else an explosion
+emits is light being added to the frame, which is what additive blending is for.
+An additively-blended dark grey is not dark at all — it is a grey glow — and
+with a reactor throwing hundred-metre clouds the whole blast came out as a field
+of soft white bokeh with a fire in the middle of it.
+
+Impacts got the same treatment. An over-penetration blows the inside of the
+compartment it crossed out through the exit hole, along the round's own line; a
+contact-fused shell throws a hemisphere of fire and stripped plate back off the
+plating it burst on; an entry wound spits some of the hole back out of the hole.
+
+Everything is sized in tens of metres, not metres. A point's screen size is
+`psize × 320 / distance`, so a one-metre puff on a hull 200 m away is two pixels
+and on one 2 km away is a third of a pixel — every damage effect in the file was
+authored at hull-detail scale and was therefore invisible at the range the game
+is actually fought at.
+
+#### Debris is culled by what you can see, not by a timer
+
+A wreck should still be a debris field when you come back to it, and "the
+wreckage evaporated while I was looking at it" is the specific thing that makes
+a kill feel cheap. A fragment lives until it is more than 5 km from the camera or
+has been out of view for a continuous 30 seconds. The pool is finite, so a fresh
+fragment recycles the oldest slot when every slot is live — that is the backstop,
+not the mechanism.
+
+Impact debris is gated on the round being a real penetrator for exactly this
+reason: a repeater perforating a radiator a hundred times a second would
+otherwise own the whole pool inside four seconds, and the pieces that matter —
+the ones a wreck is made of — would be evicted by shell splinters.
+
+#### Sound is four layers too
+
+There is no air out here, so nothing you hear arrives through it. What the crew
+hear is structure-borne: the recoil of their own mounts up through the deck, a
+slug arriving as a hammer blow on the plating, a magazine letting go somewhere
+forward as a shock through the frames. That is a specification, not a licence —
+every sound is built the way a real transient is.
+
+**Crack**, the first two milliseconds, broadband and gone: what tells the ear how
+big and how close a thing was, and what a pure oscillator blip has none of.
+**Body**, the event itself, filtered noise sweeping downward as the energy
+spreads. **Thump**, a sine falling from a hundred hertz to twenty — felt more
+than heard, and the entire difference between a gun and a beep. **Ring**, a
+convolution tail, because a warship is a very large bell and it is being hit.
+
+Distance dulls it through a low-pass, which is the strongest cue the ear has for
+how far away something big is; the whole mix goes through one compressor, so a
+broadside is loud rather than a clipped mess; and point defence is rate-limited
+to one report per burst, because a hundred separate reports a second is not a
+sound, it is a fuzz that eats the voice budget.
 
 #### The repeating driver
 
@@ -994,12 +1174,39 @@ loop — never "this is a big ship".
 ### Atmosphere, fire and the vent
 
 Compartments hold air. Breaches vent it at a rate set by hole size and volume.
-Fire needs oxygen *and* spilled fuel, consumes both, heats the local coolant
-loop, burns through soft goods (conduits — so fire costs you a network) and
-spreads only into neighbours that have air and something to burn.
+Fire needs spilled fuel and *either* oxygen or enough of that spill to bring its
+own oxidiser; it consumes both, heats the local coolant loop, burns through soft
+goods (conduits — so fire costs you a network) and spreads only into neighbours
+that have air and something to burn.
 
-`B` blows the emergency vent on the worst fire aboard. It goes out instantly,
-because there is nothing to burn. So does anyone still in the compartment.
+That "or" is the whole reason fire exists in this game. Under the old rule a
+fire needed the compartment's air, and the round that starts a fire is the same
+round that opens the compartment — so every fire aboard went out within seconds
+and the only ones that ever burned were in sealed rooms nothing had hit. A hull
+could be shot to pieces without ever catching, which is exactly what it looked
+like from outside. Propellant and coolant carry their own oxidiser and keep
+burning in an open bay, at rather less than half intensity, until the volatile
+is gone.
+
+Gunfire has to be able to start one, too. Nothing aboard is empty space —
+hydraulic runs, coolant returns and the compartment's own stores are threaded
+through every bay — so a hit that opens one puts some of that on the deck, and a
+hypervelocity impact throws incandescent spall off the back face of the plate it
+just crossed into whatever it cut on the way. Before that, the *only* source of
+spill was a direct hit on a fuel tank.
+
+`B` blows the emergency vent on the worst fire aboard. It goes out instantly —
+the vent smothers a fire outright, whatever is on the deck. So does anyone still
+in the compartment.
+
+Both show from outside, and they show from the *wounds*: a compartment vents
+through the holes shot in it, and a fire aboard is a bay full of burning stores
+with a hole in the side of it, so what you see is a jet dragged flat by the
+ship's own motion. Venting runs off the hole being open rather than off the air
+being left, and keeps running until the crew weld it — thinning as the
+atmosphere goes, then continuing as sublimating coolant and outgassing stores.
+"The hole stopped smoking so it must be fixed" would be a lie the ship tells the
+player about its own condition.
 
 ### Crew
 
@@ -1116,12 +1323,22 @@ subsystem rather than the hull.
 npm test
 ```
 
-81 assertions, no framework, about a second. They drive the real `Systems` and
-`Crew` classes with no renderer attached and cover the things that are expensive
-to notice by flying around: network redundancy on each hull, load-shed ordering,
-the shield coupling curve and both of its failure modes, the radiator-to-shield
-coupling, perforation and decompression, fire needing air, magazine cook-off,
-crew repair and pathing, and the capability read-outs.
+717 assertions, no framework, about a second. They drive the real `Systems`,
+`Crew` and `Ballistics` classes with no renderer attached and cover the things
+that are expensive to notice by flying around: network redundancy on each hull,
+load-shed ordering, the shield coupling curve and both of its failure modes, the
+radiator-to-shield coupling, perforation and decompression, fire surviving the
+round that started it, magazine cook-off, crew repair and pathing, mount seating
+and traverse, point-defence sky coverage per hull, directors spreading across a
+salvo, and the capability read-outs.
+
+Two of those are there because the bug was invisible without a number. Seeker
+guidance asserts a **miss distance in metres**, not that the maths looks right —
+a subtly wrong turn limit produced textbook-looking proportional navigation that
+sailed past a stationary target at 250 m every time. Point-defence coverage
+asserts the **fraction of the sphere** each hull can actually train onto, because
+"it has eight repeaters" and "it can shoot at something below it" are different
+claims and only the second one matters.
 
 The hull tables also self-validate at import: every conduit endpoint and declared
 dependency must resolve, compartments may not overlap (they would double-charge
