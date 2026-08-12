@@ -340,6 +340,15 @@ ok('bow-gun hulls hold a zero fight aspect',
 }
 
 {
+  const status = {};
+  const savedDocument = globalThis.document;
+  globalThis.document = { getElementById() { return status; } };
+  Game.prototype._setLockStatus.call({ started: true }, 'TRY AGAIN');
+  globalThis.document = savedDocument;
+  ok('pointer-lock failure appears on the active pause card', status.textContent === 'TRY AGAIN');
+}
+
+{
   const donorParty = { size: 10, max: 10, at: 'donor' };
   const needParty = { size: 5.9, max: 6, at: 'need' };
   const donor = { max: 10, role: 'gunner', suited: false, parties: [donorParty] };

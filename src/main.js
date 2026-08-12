@@ -66,6 +66,10 @@ export class Game {
     button.disabled = true;
   }
 
+  _setLockStatus(message) {
+    document.getElementById(this.started ? 'pauseStatus' : 'startStatus').textContent = message;
+  }
+
   constructor() {
     this.canvas = document.getElementById('view');
     this.renderer = new THREE.WebGLRenderer({
@@ -146,11 +150,11 @@ export class Game {
     document.getElementById('splashStart').addEventListener('click', requestStart);
     document.getElementById('pauseStart').addEventListener('click', requestStart);
     this.input.onLockError = () => {
-      document.getElementById('startStatus').textContent =
-        'POINTER LOCK UNAVAILABLE — ENABLE IT OR USE A SUPPORTED BROWSER';
+      this._setLockStatus('POINTER LOCK WAS NOT GRANTED — CLICK TO TRY AGAIN');
     };
     this.input.onLockChange = (locked) => {
       if (locked) {
+        this._setLockStatus('');
         this.staticRendered = false;
         if (this.resuming) {
           this.resuming = false;
