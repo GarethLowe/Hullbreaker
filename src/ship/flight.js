@@ -149,15 +149,6 @@ export class Body {
     this.omega.z += _v2.z * this.invInertia.z;
   }
 
-  localToWorld(local, out = new THREE.Vector3()) {
-    return out.copy(local).sub(this.com).applyQuaternion(this.quat).add(this.pos);
-  }
-
-  worldToLocal(world, out = new THREE.Vector3()) {
-    return out.copy(world).sub(this.pos)
-      .applyQuaternion(_q.copy(this.quat).invert()).add(this.com);
-  }
-
   forward(out = new THREE.Vector3()) {
     return out.copy(FORWARD).applyQuaternion(this.quat);
   }
