@@ -1047,6 +1047,7 @@ export class Ballistics {
         // Fragments are small, fast and arrive as a swarm of tiny spikes.
         dwell: 8e-4,
         dump: 0,
+        holeSize: 0.075,
         special: null,
         owner,
         caliber: 'shrapnel',

@@ -1460,6 +1460,14 @@ ok('bow-gun hulls hold a zero fight aspect',
   ok('cook-off starts a fire', spine.fire > 0);
 }
 {
+  let hit = null;
+  Ballistics.prototype.castShrapnel.call({
+    game: { random: () => 0.5 },
+    resolvePath(origin, direction, distance, ctx) { hit = ctx; },
+  }, new Vector3(), 1, 1e6, null);
+  ok('blast fragments explicitly make small holes', hit.holeSize === 0.075);
+}
+{
   const sys = new Systems(HULLS.meridian, { game: { random: () => 0 } });
   const mag = sys.get('mag_fwd');
   sys.damageModule(mag.id, 4e5, null, null);
