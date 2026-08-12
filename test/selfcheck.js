@@ -87,6 +87,19 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
 }
 
 {
+  const ship = { disposed: false, dispose() { this.disposed = true; } };
+  const game = {
+    ships: [ship], pilots: new Map(), player: { ship },
+    targeting: { target: null, setTarget() {} },
+    diagnostics: { ship, setShip(next) { this.ship = next; } },
+    targetPanel: { ship: null, setShip() {} },
+  };
+  Game.prototype._disposeShip.call(game, ship);
+  ok('disposing the player clears player and diagnostics references',
+    game.player === null && game.diagnostics.ship === null);
+}
+
+{
   let resized = 0;
   const panel = { ship: null, root: { classList: { toggle() {} } }, visible: true, resize() { resized++; } };
   Diagnostics.prototype.setShip.call(panel, {});

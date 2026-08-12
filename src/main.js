@@ -210,6 +210,9 @@ export class Game {
     if (this.targeting.target === ship) {
       this.targeting.setTarget(null);
     }
+    if (this.player && this.player.ship === ship) {
+      this.player = null;
+    }
     if (this.diagnostics.ship === ship) {
       this.diagnostics.setShip(this.player ? this.player.ship : null);
     }
