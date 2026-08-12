@@ -470,9 +470,10 @@ export function resolveCollision(a, b, restitution = 0.25) {
   rel.copy(b.vel).sub(a.vel);
   const closing = rel.dot(n);
   // Push apart even when separating, so ships never end up welded together.
-  const push = (minDist - dist) * 0.5;
-  a.pos.addScaledVector(n, -push);
-  b.pos.addScaledVector(n, push);
+  const push = minDist - dist;
+  const invMass = a.invMass + b.invMass;
+  a.pos.addScaledVector(n, -push * a.invMass / invMass);
+  b.pos.addScaledVector(n, push * b.invMass / invMass);
   if (closing >= 0) {
     return null;
   }

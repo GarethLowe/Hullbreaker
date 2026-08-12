@@ -253,6 +253,14 @@ ok('bow-gun hulls hold a zero fight aspect',
     hit.energy >= 0 && hit.energy < 0.5 * (a.mass / 2) * 20 * 20,
     `energy ${hit.energy}`);
 }
+{
+  const light = new Body(HULLS.sabre);
+  const heavy = new Body(HULLS.bastion);
+  const heavyStart = heavy.pos.x = light.radius + heavy.radius - 10;
+  resolveCollision(light, heavy);
+  ok('collision de-penetration moves the lighter hull farther',
+    Math.abs(light.pos.x) > Math.abs(heavy.pos.x - heavyStart) * 20);
+}
 
 // --- networks ---------------------------------------------------------------
 {
