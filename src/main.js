@@ -95,6 +95,8 @@ export class Game {
     this.wave = 0;
     /** The player's ship as the current wave began; see `retryWave`. */
     this.waveStart = null;
+    /** Kills banked before the current wave; retries replay only this wave. */
+    this.waveKills = 0;
     this.waveTimer = 3;
     this.kills = 0;
     this.paused = false;
@@ -243,6 +245,7 @@ export class Game {
    */
   startWave(w) {
     this.wave = w;
+    this.waveKills = this.kills;
     this.waveStart = this.player && !this.player.ship.disposed
       ? this.player.ship.snapshot() : null;
     this._deployWave(w);
@@ -340,6 +343,7 @@ export class Game {
    */
   retryWave() {
     const snap = this.waveStart;
+    this.kills = this.waveKills;
     const bindings = this._clearWorld();
     this._deployPlayer(snap, bindings);
     this._resumePlaying();

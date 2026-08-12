@@ -116,6 +116,16 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
 }
 
 {
+  const game = {
+    waveStart: {}, waveKills: 5, kills: 8, wave: 3,
+    _clearWorld() { return null; }, _deployPlayer() {}, _resumePlaying() {}, _deployWave() {},
+    hud: { warn() {} },
+  };
+  Game.prototype.retryWave.call(game);
+  ok('retrying a wave restores only the kills banked before it', game.kills === 5);
+}
+
+{
   let resized = 0;
   const panel = { ship: null, root: { classList: { toggle() {} } }, visible: true, resize() { resized++; } };
   Diagnostics.prototype.setShip.call(panel, {});
