@@ -321,6 +321,13 @@ ok('bow-gun hulls hold a zero fight aspect',
     pilot._gunAim(1 / 60, aim).equals(pilot.lastSeen) && pilot.aimModule === null);
 }
 
+{
+  const party = { size: 2, casualtyAcc: 4, task: {}, heading: 'bridge', path: ['bridge'] };
+  party.div = { parties: [party] };
+  Crew.prototype._wipe.call({ events: [] }, party, 'fire');
+  ok('wiping a party clears its accumulated casualty report', party.casualtyAcc === 0);
+}
+
 // --- physics and thermal invariants ----------------------------------------
 {
   const sys = fresh();

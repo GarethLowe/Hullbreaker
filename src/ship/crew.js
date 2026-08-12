@@ -685,6 +685,7 @@ export class Crew {
 
   _wipe(d, cause) {
     d.size = 0;
+    d.casualtyAcc = 0;
     d.task = null;
     d.heading = null;
     d.path = [];
