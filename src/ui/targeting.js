@@ -41,8 +41,23 @@ export class Targeting {
     this.contacts = [];
     this.canvas = document.getElementById('radar');
     this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
-    this._lockBeep = 0;
     this._subIndex = -1;
+    this.resize();
+  }
+
+  resize() {
+    if (!this.canvas) {
+      return;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const width = Math.max(1, Math.round(rect.width * dpr));
+    const height = Math.max(1, Math.round(rect.height * dpr));
+    this.dpr = dpr;
+    if (this.canvas.width !== width || this.canvas.height !== height) {
+      this.canvas.width = width;
+      this.canvas.height = height;
+    }
   }
 
   get ship() {
@@ -286,8 +301,9 @@ export class Targeting {
     if (!ctx) {
       return;
     }
-    const W = this.canvas.width;
-    const H = this.canvas.height;
+    const W = this.canvas.clientWidth;
+    const H = this.canvas.clientHeight;
+    ctx.setTransform(this.dpr || 1, 0, 0, this.dpr || 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
     const cx = W / 2;

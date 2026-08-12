@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HULLBREAK</title>
 <!--
   This import map lets the source folder be served statically and played with no
@@ -31,6 +31,11 @@
     --diag-w: 330px;
   }
   @media (max-width: 900px) { :root { --diag-w: 250px; } }
+  @media (max-width: 640px) {
+    :root { --diag-w: min(100vw - 24px, 330px); }
+    #hudLeft, #hudRight, #hudTarget, #hudRadar { display: none; }
+    .dcpanel { width: var(--diag-w); }
+  }
 
   * { box-sizing: border-box; }
 
@@ -453,11 +458,8 @@
     justify-content: center;
     background: rgba(3, 6, 10, 0.86);
     backdrop-filter: blur(5px);
-    /* The click that dismisses these is handled on the window, so nothing here
-       needs to be interactive — and dragging across the key list should not
-       select text when the user is trying to start the game. */
-    user-select: none;
-    cursor: pointer;
+    overflow-y: auto;
+    padding: 18px;
   }
   #gameover { cursor: default; }
   .overlay.hidden { display: none; }
@@ -500,7 +502,19 @@
     font-size: 12px;
     animation: pulse 2.1s ease-in-out infinite;
   }
+  button.start {
+    display: inline-block;
+    border: 1px solid var(--line);
+    background: rgba(120, 180, 215, 0.12);
+    padding: 10px 14px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  button.start:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   @keyframes pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .diag-fix.on, .start { animation: none; opacity: 0.95; }
+  }
 </style>
 </head>
 <body>
@@ -631,7 +645,8 @@
       <kbd>M</kbd><span>Mute</span>
       <kbd>Esc</kbd><span>Pause</span>
     </div>
-    <div class="start">CLICK TO FLY</div>
+    <p id="startStatus" role="status" aria-live="polite"></p>
+    <button id="splashStart" class="start" type="button">CLICK TO FLY</button>
   </div>
 </div>
 
@@ -639,7 +654,7 @@
   <div class="card">
     <h1>PAUSED</h1>
     <h2>POINTER RELEASED</h2>
-    <div class="start">CLICK TO RESUME</div>
+    <button id="pauseStart" class="start" type="button">CLICK TO RESUME</button>
   </div>
 </div>
 

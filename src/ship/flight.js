@@ -22,7 +22,7 @@
 // general — it rolls one way and not the other.
 // -----------------------------------------------------------------------------
 import * as THREE from 'three';
-import { clamp, clamp01, damp } from '../core/mathx.js';
+import { clamp, clamp01 } from '../core/mathx.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -137,8 +137,10 @@ export class Body {
     _v.copy(dirUnit).multiplyScalar(magnitude);
     this.vel.addScaledVector(_v, this.invMass);
     // r x F, taken about the real centre of mass and expressed body-frame.
+    // Body.pos is already the world-space centre of mass, so point - pos is
+    // the complete lever arm. Subtracting this.com here would count it twice.
     _v2.copy(point).sub(this.pos);
-    _v2.applyQuaternion(_q.copy(this.quat).invert()).sub(this.com);
+    _v2.applyQuaternion(_q.copy(this.quat).invert());
     _v.applyQuaternion(_q);                 // impulse into body frame
     _v2.cross(_v);
     this.omega.x += _v2.x * this.invInertia.x;
@@ -170,7 +172,7 @@ export class Body {
       this.omega.y * this.inertia.y,
       this.omega.z * this.inertia.z,
     );
-    _v.cross(this.omega).negate().add(this.torque);
+    _v.cross(this.omega).add(this.torque);
     this.omega.x += _v.x * this.invInertia.x * dt;
     this.omega.y += _v.y * this.invInertia.y * dt;
     this.omega.z += _v.z * this.invInertia.z * dt;
@@ -436,10 +438,9 @@ export class Autopilot {
  * into the hull rather than back into motion.
  */
 export function resolveCollision(a, b, restitution = 0.25) {
-  // Dedicated temporaries: applyImpulseAt below reuses the module-level ones.
+  // Dedicated temporaries kept local to collision resolution.
   const n = _colN;
   const rel = _colR;
-  const pt = _colP;
 
   n.copy(b.pos).sub(a.pos);
   const dist = n.length();
@@ -460,18 +461,13 @@ export function resolveCollision(a, b, restitution = 0.25) {
   const j = -(1 + restitution) * closing / (a.invMass + b.invMass);
   a.vel.addScaledVector(n, -j * a.invMass);
   b.vel.addScaledVector(n, j * b.invMass);
-  // Contact is on the line of centres; off-axis mass distribution turns that
-  // into spin, so ramming a hull off its nose sets it tumbling.
-  pt.copy(n).multiplyScalar(a.radius).add(a.pos);
-  a.applyImpulseAt(pt, n, -j * 0.35);
-  pt.copy(n).multiplyScalar(-b.radius).add(b.pos);
-  b.applyImpulseAt(pt, n, j * 0.35);
-  // Energy that did not come back as motion went into both hulls.
-  return { impulse: j, energy: Math.abs(j * closing) * 0.5, normal: n.clone() };
+  // Sphere contact lies on the line of centres, so it has no physical torque.
+  // A future hull-contact solver may add an angular impulse from its actual
+  // off-centre contact point, but it must not apply translation a second time.
+  const reducedMass = 1 / (a.invMass + b.invMass);
+  const energy = 0.5 * reducedMass * closing * closing * (1 - restitution * restitution);
+  return { impulse: j, energy, normal: n.clone() };
 }
 
 const _colN = new THREE.Vector3();
 const _colR = new THREE.Vector3();
-const _colP = new THREE.Vector3();
-
-export { damp };

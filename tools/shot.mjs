@@ -58,7 +58,7 @@ page.on('pageerror', (e) => errors.push(`PAGEERROR ${e.message}`));
 
 await page.goto(opt('url', 'http://127.0.0.1:5174/'), { waitUntil: 'networkidle', timeout: 60000 });
 await page.waitForTimeout(3500);
-await page.mouse.click(800, 450).catch(() => {});
+await page.locator('#splashStart').click().catch(() => {});
 await page.waitForTimeout(1200);
 
 const info = await page.evaluate(({ view, views, mount, chrome, enemy, hull }) => {
@@ -158,3 +158,6 @@ if (flag('fire')) {
 }
 console.log(JSON.stringify({ info, errors: errors.slice(0, 10) }, null, 1));
 await browser.close();
+if (!info.found || errors.length > 0) {
+  process.exitCode = 1;
+}

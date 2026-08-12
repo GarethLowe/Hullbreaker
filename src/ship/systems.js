@@ -228,11 +228,6 @@ const ARC_DAMAGE_FRAC = 0.03;   // of the victim's maxHp
 const BREACH_DETONATE_CHANCE = 0.35;
 
 // --- shield model ---------------------------------------------------------
-// Depth of the field a projectile has to cross before it is through, in metres.
-// Dividing this by the round's velocity gives the time over which its energy is
-// delivered, and therefore the instantaneous power the emitters have to handle.
-// This is the whole reason a slug beats a shield and a laser does not.
-export const FIELD_DEPTH = 3.0;
 /** How much load a facet can hold before its emitters saturate, vs capacity. */
 const FACET_LOAD_RATIO = 8;
 /** Joules of field energy spent re-establishing per joule absorbed. */
@@ -333,7 +328,6 @@ export class Systems {
         hp: def.hp,
         maxHp: def.hp,
         destroyed: false,
-        damagedAt: -1e9,
         temp: AMBIENT_C,
         /** Latched thermal trip; clears when the module cools back down. */
         tripped: false,
@@ -475,8 +469,6 @@ export class Systems {
 
     this.integrity = 1;
     this.destroyed = false;
-    /** Set once the hull can no longer be considered a fighting ship. */
-    this.strickenT = 0;
   }
 
   // -- lookups ---------------------------------------------------------------
@@ -542,7 +534,6 @@ export class Systems {
     }
     const dealt = joules * m.def.vuln;
     m.hp = Math.max(0, m.hp - dealt);
-    m.damagedAt = performance.now();
 
     // Fluid carriers start weeping before they rupture outright, so plumbing
     // damage announces itself as a slow problem before it becomes a fast one.
@@ -796,7 +787,8 @@ export class Systems {
       // Per unit of compartment, not per compartment. A dreadnought's drive
       // cluster is a hundred times the volume of a picket's avionics bay and
       // should not come to the same temperature off the same joule.
-      s.temp = Math.min(900, s.temp + (joules * 4e-5) * (REF_VOLUME / Math.max(s.volume, 1)));
+      s.temp = Math.min(900, s.temp + (joules * 4e-5)
+        * (REF_VOLUME / Math.max(s.def.volume, 1)));
     }
     for (const m of this.modules.values()) {
       if (m.section !== sectionId || m.destroyed) {

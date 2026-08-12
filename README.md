@@ -47,24 +47,24 @@ That is the whole loop. Other entry points:
 | `npm run play` | production build, then serve it on :4174 and open a browser |
 | `npm run build` | production bundle into `dist/` |
 | `npm test` | headless assertions over the simulation (see below) |
-| `npm run serve:nobuild` | static-serve the source with **no build at all** |
+| `npm run serve:nobuild` | static-serve the source on loopback with **no build at all** |
 
-**No-build path.** `index.html` carries a CDN import map for Three.js, so the
-source folder can be served by any static file server and played without
-installing anything:
+**No-build path.** `index.html` carries a CDN import map for Three.js. After
+installing dependencies, the source folder can be served without a build:
 
 ```bash
-npx --yes serve -l 5174 .
+npm run serve:nobuild
 ```
 
 It has to be over HTTP either way — browsers refuse ES module imports from
 `file://`. Under Vite the import map is inert, and `vite build` strips it.
 
-**Build output.** Two chunks: app ~153 kB, `three` ~472 kB. There is no physics
-library. Everything else — textures, materials, sound — is generated at runtime,
-so there are no binary assets in the repository.
+**Build output.** The app and Three.js are separate cacheable chunks. There is
+no physics library. Everything else — textures, materials, sound — is generated
+at runtime, so there are no binary assets in the repository.
 
-**Requirements:** any WebGL2 browser.
+**Requirements:** Node 20 or newer for development; a modern browser with
+WebGL2, Pointer Lock, AudioContext, ES2022 support, and CSS :has() for play.
 
 ### Controls
 
@@ -1358,8 +1358,6 @@ a cruiser out of control. A frigate has one of each, and feels it.
 Mass and the inertia tensor are derived from the compartment boxes by the
 parallel axis theorem, so every hull genuinely rolls more easily than it pitches
 and nobody hand-authored a plausible number.
-
-### Targeting
 
 ### The hostile pilot
 

@@ -4,18 +4,23 @@
   "private": true,
   "type": "module",
   "description": "Browser 6DOF space combat sim with fully modelled ship interiors — power, coolant and data networks, atmosphere, fire, virtual crew and repair.",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "vite --open",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "play": "vite build && vite preview --open",
-    "serve:nobuild": "npx --yes serve -l 5174 .",
-    "test": "node test/selfcheck.js"
+    "serve:nobuild": "serve -l 127.0.0.1:5174 .",
+    "test": "node test/selfcheck.js",
+    "test:smoke": "node tools/shot.mjs .smoke.png --chrome --url http://127.0.0.1:4174/"
   },
   "devDependencies": {
     "playwright": "^1.62.1",
-    "vite": "^5.4.0"
+    "serve": "^14.2.4",
+    "vite": "^8.2.1"
   },
   "dependencies": {
     "three": "0.160.0"

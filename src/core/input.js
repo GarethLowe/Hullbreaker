@@ -22,6 +22,7 @@ export class Input {
     this.locked = false;
     this.sensitivity = 0.0016;
     this.onLockChange = null;
+    this.onLockError = null;
 
     this._onKeyDown = (e) => {
       // Let the browser keep its own chords (devtools, reload, tab switching).
@@ -75,6 +76,20 @@ export class Input {
         this.onLockChange(this.locked);
       }
     };
+    this._onLockError = () => {
+      if (this.onLockError) {
+        this.onLockError();
+      }
+    };
+    this._reset = () => {
+      this.keys.clear();
+      this.pressedThisFrame.clear();
+      this.buttons = [false, false, false];
+      this.buttonsPressed = [false, false, false];
+      this.mouse.dx = 0;
+      this.mouse.dy = 0;
+      this.mouse.wheel = 0;
+    };
     this._onContext = (e) => e.preventDefault();
 
     window.addEventListener('keydown', this._onKeyDown);
@@ -84,12 +99,23 @@ export class Input {
     window.addEventListener('mouseup', this._onMouseUp);
     window.addEventListener('wheel', this._onWheel, { passive: false });
     document.addEventListener('pointerlockchange', this._onLockChange);
+    document.addEventListener('pointerlockerror', this._onLockError);
+    window.addEventListener('blur', this._reset);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this._reset();
+      }
+    });
     domElement.addEventListener('contextmenu', this._onContext);
   }
 
   requestLock() {
-    if (this.locked || !this.dom.requestPointerLock) {
-      return;
+    if (this.locked) {
+      return true;
+    }
+    if (!this.dom.requestPointerLock) {
+      this._onLockError();
+      return false;
     }
     // Chrome rejects this if it arrives too soon after an Esc-driven exit, and
     // newer versions return a promise that becomes an unhandled rejection if
@@ -98,11 +124,12 @@ export class Input {
     try {
       const p = this.dom.requestPointerLock();
       if (p && typeof p.catch === 'function') {
-        p.catch(() => {});
+        p.catch(() => this._onLockError());
       }
     } catch (e) {
-      // Locking is a courtesy; the game is still playable without it.
+      this._onLockError();
     }
+    return false;
   }
 
   exitLock() {

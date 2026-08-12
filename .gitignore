@@ -4,3 +4,5 @@ dist/
 .DS_Store
 tools/layout.json
 tools/__pycache__/
+.smoke.png
+debug.log

@@ -10,7 +10,7 @@
 import { HULLS, ENGAGEMENT_RANGE, NETS } from '../src/ship/hulls.js';
 import { Systems, ATMO_CRITICAL, TRIP_TEMP_C, FUEL_LEAK_RATE } from '../src/ship/systems.js';
 import { Crew } from '../src/ship/crew.js';
-import { Body, Autopilot, BURN_RATE } from '../src/ship/flight.js';
+import { Body, Autopilot, BURN_RATE, resolveCollision } from '../src/ship/flight.js';
 import { WEAPONS, AMMO, MOUNTS } from '../src/weapons/defs.js';
 import { Ballistics } from '../src/weapons/ballistics.js';
 import { Ship, MOUNT_DEPRESSION } from '../src/ship/ship.js';
@@ -27,6 +27,15 @@ import {
 
 let passed = 0;
 const failures = [];
+
+// Keep probabilistic checks reproducible. Set SELFCHECK_SEED to replay a
+// different run; the effective seed is printed with the result.
+const SELF_CHECK_SEED = Number.parseInt(process.env.SELFCHECK_SEED || '1729', 10) >>> 0;
+let randomState = SELF_CHECK_SEED || 1;
+Math.random = () => {
+  randomState = (randomState * 1664525 + 1013904223) >>> 0;
+  return randomState / 0x100000000;
+};
 
 function ok(name, cond, detail = '') {
   if (cond) {
@@ -94,6 +103,67 @@ for (const [id, h] of Object.entries(HULLS)) {
     h.flight.yawRate > sweep * 1.5 || turrets,
     `hull ${(h.flight.yawRate * 57.3).toFixed(1)} deg/s vs sweep `
     + `${(sweep * 57.3).toFixed(1)} deg/s, turrets=${turrets}`);
+}
+
+// --- physics and thermal invariants ----------------------------------------
+{
+  const sys = fresh();
+  const section = sys.section('spine');
+  const before = section.temp;
+  sys.injectHeat('spine', 1e6);
+  ok('beam heat keeps compartment temperature finite',
+    Number.isFinite(section.temp) && section.temp > before, `temp ${section.temp}`);
+}
+{
+  for (const [id, hull] of Object.entries(HULLS)) {
+    let expected = 0;
+    for (const section of hull.sections) {
+      expected = Math.max(expected, Math.hypot(
+        Math.abs(section.pos[0] - hull.com[0]) + section.half[0],
+        Math.abs(section.pos[1] - hull.com[1]) + section.half[1],
+        Math.abs(section.pos[2] - hull.com[2]) + section.half[2],
+      ));
+    }
+    near(`${id}: collision radius is measured from its centre of mass`,
+      hull.radius, expected, 1e-9);
+  }
+}
+{
+  const body = new Body(HULLS.meridian);
+  body.applyImpulseAt(body.pos, new Vector3(1, 0, 0), 1000);
+  ok('an impulse at the centre of mass creates no spin', body.omega.lengthSq() < 1e-20,
+    `omega ${body.omega.toArray()}`);
+}
+{
+  const body = new Body(HULLS.sabre);
+  body.omega.set(1.2, -0.7, 0.4);
+  const before = body.omega.clone();
+  const Iw = before.clone().multiply(body.inertia);
+  const expected = Iw.cross(before).multiply(body.invInertia);
+  const dt = 1e-5;
+  body.integrate(dt);
+  near('Euler free-precession x has the documented sign', body.omega.x,
+    before.x + expected.x * dt, 1e-10);
+  near('Euler free-precession y has the documented sign', body.omega.y,
+    before.y + expected.y * dt, 1e-10);
+  near('Euler free-precession z has the documented sign', body.omega.z,
+    before.z + expected.z * dt, 1e-10);
+}
+{
+  const a = new Body(HULLS.sabre);
+  const b = new Body(HULLS.sabre);
+  b.pos.set(a.radius + b.radius - 1, 0, 0);
+  a.vel.set(10, 0, 0);
+  b.vel.set(-10, 0, 0);
+  const initialMomentum = a.mass * a.vel.x + b.mass * b.vel.x;
+  const hit = resolveCollision(a, b, 0.25);
+  const relative = b.vel.x - a.vel.x;
+  near('collision applies configured restitution once', relative, 5, 1e-9);
+  near('collision conserves linear momentum', a.mass * a.vel.x + b.mass * b.vel.x,
+    initialMomentum, 1e-4);
+  ok('collision damage energy is bounded by initial relative kinetic energy',
+    hit.energy >= 0 && hit.energy < 0.5 * (a.mass / 2) * 20 * 20,
+    `energy ${hit.energy}`);
 }
 
 // --- networks ---------------------------------------------------------------
@@ -2478,6 +2548,7 @@ for (const [id, h] of Object.entries(HULLS)) {
   /** Fly one warhead at a target and report how close it got, in metres. */
   const intercept = (weapon, from, aimAt, target, seconds) => {
     ball.missiles.length = 0;
+    game.ships = [target];
     ball.spawnMissile({ name: 'LAUNCHER', faction: 'a' }, from,
       aimAt.clone().sub(from).normalize(), new Vector3(), weapon, target);
     ball.missiles[0].armT = 1e9;      // never fuse; we want the miss distance
@@ -2906,9 +2977,9 @@ for (const [id, h] of Object.entries(HULLS)) {
 
 // --- report -----------------------------------------------------------------
 if (failures.length === 0) {
-  console.log(`selfcheck: ${passed} assertions passed`);
+  console.log(`selfcheck: ${passed} assertions passed (seed ${SELF_CHECK_SEED})`);
 } else {
-  console.error(`selfcheck: ${passed} passed, ${failures.length} FAILED\n`);
+  console.error(`selfcheck: ${passed} passed, ${failures.length} FAILED (seed ${SELF_CHECK_SEED})\n`);
   for (const f of failures) {
     console.error(`  x ${f}`);
   }

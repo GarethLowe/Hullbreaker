@@ -560,7 +560,7 @@ export class Pilot {
     // laid over the station-keeping rather than replacing it. `strafeX` pushes
     // to STARBOARD, which is -X in this frame, so closing on a target off the
     // port bow is a negative deflection.
-    const t = performance.now() * 0.001;
+    const t = this.game.simTime;
     const hold = clamp(-want * _local.x, -1, 1);
     cmd.strafeX = clamp(hold
       + Math.sin(t * 0.9 * this.reflex + this.ship.id) * 0.45 * this.aggression, -1, 1);

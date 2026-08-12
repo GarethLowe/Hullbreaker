@@ -2261,13 +2261,13 @@ function fightAspect(spec) {
   return samples[Math.round((bestRun.from + bestRun.to) / 2)].th;
 }
 
-function boundingRadius(spec) {
+function boundingRadius(spec, com) {
   let r = 0;
   for (const s of spec.sections) {
     const d = Math.hypot(
-      Math.abs(s.pos[0]) + s.half[0],
-      Math.abs(s.pos[1]) + s.half[1],
-      Math.abs(s.pos[2]) + s.half[2],
+      Math.abs(s.pos[0] - com[0]) + s.half[0],
+      Math.abs(s.pos[1] - com[1]) + s.half[1],
+      Math.abs(s.pos[2] - com[2]) + s.half[2],
     );
     r = Math.max(r, d);
   }
@@ -2294,6 +2294,11 @@ function validate(spec) {
     ids.add(m.id);
   }
   const sections = new Set(spec.sections.map((s) => s.id));
+  for (const s of spec.sections) {
+    if (!Number.isFinite(s.volume) || s.volume <= 0) {
+      throw new Error(spec.id + ': section "' + s.id + '" has invalid volume ' + s.volume);
+    }
+  }
   for (const m of spec.modules) {
     if (!sections.has(m.section)) {
       throw new Error(`${spec.id}: module "${m.id}" is in unknown section "${m.section}"`);
@@ -2452,7 +2457,7 @@ function compile(spec) {
 
   // The field has to actually enclose the ship — hardware included. Derived,
   // not authored — see `shieldRadii`.
-  const radius = boundingRadius(spec);
+  const radius = boundingRadius(spec, com);
   spec.gunScale = gunScaleFor(radius);
   spec.shield.radii = shieldRadii(spec, com, spec.gunScale);
 

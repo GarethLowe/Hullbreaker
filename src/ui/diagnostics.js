@@ -108,6 +108,22 @@ export class Diagnostics {
     this._rows = new Map();
     this._builtFor = null;
     this._selected = null;
+    this.resize();
+  }
+
+  resize() {
+    if (!this.canvas) {
+      return;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const width = Math.max(1, Math.round(rect.width * dpr));
+    const height = Math.max(1, Math.round(rect.height * dpr));
+    this.dpr = dpr;
+    if (this.canvas.width !== width || this.canvas.height !== height) {
+      this.canvas.width = width;
+      this.canvas.height = height;
+    }
   }
 
   setShip(ship) {
@@ -406,8 +422,9 @@ export class Diagnostics {
     if (!ctx) {
       return;
     }
-    const W = this.canvas.width;
-    const H = this.canvas.height;
+    const W = this.canvas.clientWidth;
+    const H = this.canvas.clientHeight;
+    ctx.setTransform(this.dpr || 1, 0, 0, this.dpr || 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
     const hull = ship.hull;

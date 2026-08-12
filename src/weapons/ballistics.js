@@ -171,13 +171,13 @@ export class Ballistics {
     // silhouette is the only thing that says which one is coming at you.
     mesh.scale.setScalar(active ? 0.55 : 1);
     this.game.scene.add(mesh);
-    this.missiles.push({
+    const missile = {
       pos: origin.clone(),
       prev: origin.clone(),
       vel: dir.clone().multiplyScalar(weapon.muzzleVel).add(inherit),
       weapon,
       owner: ship,
-      target,
+      target: active ? null : target,
       // A command-guided torpedo aims at the locked SUBSYSTEM when there is
       // one, which is what makes subsystem targeting worth doing with ordnance
       // rather than guns. An active seeker has its own head and no idea what a
@@ -190,7 +190,14 @@ export class Ballistics {
       fuse: weapon.fuse,
       mesh,
       armT: 0.35,
-    });
+    };
+    // An active seeker must accept its launch target through the same
+    // acquisition path as any later contact. That establishes its sensor band
+    // and prevents an out-of-cone supplied target from becoming a free lock.
+    if (active) {
+      missile.target = this._acquire(missile);
+    }
+    this.missiles.push(missile);
   }
 
   /**
@@ -449,8 +456,7 @@ export class Ballistics {
       // seeker that overshoots re-acquires instead of flying on forever.
       if (w.guidance === 'active') {
         m.scanT -= dt;
-        const lost = !m.target || m.target.disposed
-          || m.target.position.distanceTo(m.pos) > w.seeker.range;
+        const lost = this._seekerLost(m);
         if (m.scanT <= 0 && (lost || m.target.dead)) {
           m.scanT = w.seeker.reacquire;
           const found = this._acquire(m);
@@ -537,6 +543,19 @@ export class Ballistics {
         this.detonate(m, m.owner, hitAt);
       }
     }
+  }
+
+  _seekerLost(m) {
+    if (!m.target || m.target.disposed || m.vel.lengthSq() < 1e-6) {
+      return true;
+    }
+    _rel.copy(m.target.position).sub(m.pos);
+    const range = _rel.length();
+    if (range < 1e-3 || range > m.weapon.seeker.range) {
+      return true;
+    }
+    _nose.copy(m.vel).normalize();
+    return _rel.dot(_nose) / range < Math.cos(m.weapon.seeker.fov);
   }
 
   /**

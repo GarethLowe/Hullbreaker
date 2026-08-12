@@ -33,16 +33,6 @@ export function damp(current, target, rate, dt) {
   return lerp(current, target, 1 - Math.exp(-rate * dt));
 }
 
-/** Move `current` toward `target` at no more than `rate` units per second. */
-export function approach(current, target, rate, dt) {
-  const d = target - current;
-  const step = rate * dt;
-  if (Math.abs(d) <= step) {
-    return target;
-  }
-  return current + Math.sign(d) * step;
-}
-
 export function rand(lo = 0, hi = 1) {
   return lo + Math.random() * (hi - lo);
 }
@@ -53,19 +43,6 @@ export function randInt(lo, hi) {
 
 export function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
-}
-
-/** Box-Muller normal sample. */
-export function gaussian(mean = 0, sd = 1) {
-  let u = 0;
-  let v = 0;
-  while (u === 0) {
-    u = Math.random();
-  }
-  while (v === 0) {
-    v = Math.random();
-  }
-  return mean + sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
 /** Uniform point on the unit sphere. */

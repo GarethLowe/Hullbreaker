@@ -236,8 +236,9 @@ export class PlayerPilot {
     // sell velocity when there is nothing nearby to compare against.
     const sp = body.vel.length();
     const maxSp = Math.max(ship.hull.flight.boostSpeed, 1);
-    const wantFov = 68 + 20 * clamp01(sp / maxSp)
-      + (ship.autopilot.boostT > 0 ? 8 : 0);
+    const motion = this.game.reducedMotion ? 0 : 1;
+    const wantFov = 68 + motion * (20 * clamp01(sp / maxSp)
+      + (ship.autopilot.boostT > 0 ? 8 : 0));
     this.fov = damp(this.fov, wantFov, 4, dt);
 
     // Shake is delta-v the hull actually took, not a damage number.
@@ -250,7 +251,7 @@ export class PlayerPilot {
     // a magazine going off underneath you does, and a picket feels every hit a
     // cruiser shrugs off because it masses a tenth as much.
     this.shake = damp(this.shake, 0, 4.5, dt);
-    this.shake = Math.min(0.7, this.shake + ship.consumeJolt() * SHAKE_PER_DV);
+    this.shake = Math.min(0.7, this.shake + ship.consumeJolt() * SHAKE_PER_DV * motion);
 
     this.camera.position.copy(this.camPos);
     this.camera.quaternion.copy(this.camQuat);

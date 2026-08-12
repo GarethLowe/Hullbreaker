@@ -25,7 +25,7 @@ export default defineConfig({
   preview: { host: '127.0.0.1', port: 4174 },
   build: {
     target: 'es2022',
-    sourcemap: true,
+    sourcemap: false,
     rollupOptions: {
       output: {
         // Three is ~470 kB and never changes between builds; splitting it out

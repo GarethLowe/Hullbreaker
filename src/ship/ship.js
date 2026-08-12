@@ -162,7 +162,6 @@ export class Ship {
     this.derelictT = 0;
     /** Kill already credited, so a hulk cannot be scored twice. */
     this.scored = false;
-    this.lastDamageT = -1e9;
     /** Delta-v taken from impacts since the camera last looked; see consumeJolt. */
     this.jolt = 0;
     /** Magazine-fed mounts all draw the same nature of round; see AMMO. */
@@ -481,7 +480,6 @@ export class Ship {
     // Point defence is not a weapon anybody chooses to fire. It comes out of
     // both the player's selectable groups and the AI's triggers entirely and
     // runs itself against inbound ordnance — see `_pointDefence`.
-    this.pdMounts = this.mounts.filter((m) => m.weapon.pointDefence);
     const gunnery = this.mounts.filter((m) => !m.weapon.pointDefence);
 
     // The AI thinks in terms of "guns I have to point the ship at" versus
@@ -984,7 +982,6 @@ export class Ship {
     // and a magazine letting go inside your own hull is in another league
     // entirely. Nothing here is tuned per ship; the mass does the work.
     this.jolt += magnitude * this.body.invMass;
-    this.lastDamageT = performance.now();
   }
 
   /** Delta-v taken since the last read, in m/s. Reading it clears it. */
@@ -1245,7 +1242,7 @@ export class Ship {
       // proportion made losing half a gun crew almost disarm a ship, which
       // turned every fight into a race to kill gunners.
       const slop = MAX_LAY_ERROR * (1 - hands) ** 1.6;
-      const ph = performance.now() * 4e-4 + mount.phase;
+      const ph = this.game.simTime * 0.4 + mount.phase;
       _lay.set(Math.sin(ph), Math.cos(ph * 1.31), 0).applyQuaternion(this.body.quat);
       _v2.addScaledVector(_lay, Math.sin(ph * 0.67) * slop).normalize();
     }
@@ -1472,10 +1469,10 @@ export class Ship {
         if (!held || !live || !mount.bears || mount.cool > 0) {
           continue;
         }
-        if (!this._takeAmmo(mount)) {
+        if (!this._canDraw(w.draw)) {
           continue;
         }
-        if (!this._canDraw(w.draw)) {
+        if (!this._takeAmmo(mount)) {
           continue;
         }
         this.sys.capStore = Math.max(0, this.sys.capStore - w.draw);

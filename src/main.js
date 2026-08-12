@@ -101,7 +101,10 @@ class Game {
     this.accumulator = 0;
     this.timeScale = 1;
     this.timeIndex = 0;
-    this.frameTimes = [];
+    /** Simulation time advances only with fixed simulation steps. */
+    this.simTime = 0;
+    this.staticRendered = false;
+    this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   }
 
   init() {
@@ -144,29 +147,32 @@ class Game {
 
     window.addEventListener('resize', () => this._onResize());
     window.addEventListener('keydown', (e) => this._onOverKey(e));
-    // Listen on the window, not the canvas. The splash and pause cards are
-    // full-screen overlays stacked above the canvas, so a canvas-level handler
-    // never sees the click that is supposed to dismiss them — which made the
-    // game literally unstartable. Pointer lock is still requested on the canvas;
-    // only the listener moves.
-    window.addEventListener('click', () => {
+    const requestStart = () => {
       if (this.over) {
         return;
       }
       this.audio.resume();
       this.input.requestLock();
-      if (!this.started) {
-        this.started = true;
-        document.getElementById('splash').classList.add('hidden');
-      }
-    });
+    };
+    document.getElementById('splashStart').addEventListener('click', requestStart);
+    document.getElementById('pauseStart').addEventListener('click', requestStart);
+    this.input.onLockError = () => {
+      document.getElementById('startStatus').textContent =
+        'POINTER LOCK UNAVAILABLE — ENABLE IT OR USE A SUPPORTED BROWSER';
+    };
     this.input.onLockChange = (locked) => {
-      if (!locked && this.started && !this.over) {
-        this.paused = true;
-        document.getElementById('pause').classList.remove('hidden');
-      } else if (locked) {
+      if (locked) {
+        this.staticRendered = false;
+        if (!this.started) {
+          this.started = true;
+          document.getElementById('splash').classList.add('hidden');
+        }
         this.paused = false;
         document.getElementById('pause').classList.add('hidden');
+      } else if (this.started && !this.over) {
+        this.staticRendered = false;
+        this.paused = true;
+        document.getElementById('pause').classList.remove('hidden');
       }
     };
 
@@ -358,6 +364,10 @@ class Game {
         this.ecs.destroy(s.entity);
       }
     }
+    // Game.ships and Game.pilots are pruned by the ECS destroy handler. Flush
+    // before deploying the replacement wave so retired enemies cannot update,
+    // fire, or collide once more.
+    this.ecs.flush();
     this.ballistics.clear();
     this.startWave(this.wave + 1);
     this.hud.nudge(`SKIPPED TO WAVE ${this.wave}`, 1.6);
@@ -880,6 +890,7 @@ class Game {
       while (this.accumulator >= STEP_INTERVAL && steps < MAX_STEPS) {
         this.accumulator -= STEP_INTERVAL;
         steps++;
+        this.simTime += dt;
         this.ecs.run({ dt, game: this });
       }
       if (steps === MAX_STEPS) {
@@ -893,26 +904,28 @@ class Game {
     // pause card re-paused the game the instant you clicked to resume.
     this.input.endFrame();
 
-    if (this.player) {
-      this.player.updateCamera(wall);
-      _v.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
-      this.audio.setListener(this.camera.position, _v);
+    const active = this.started && !this.paused && !this.over;
+    if (active || !this.staticRendered) {
+      if (this.player) {
+        this.player.updateCamera(wall);
+        _v.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
+        this.audio.setListener(this.camera.position, _v);
+      }
+      this.space.update(this.camera.position);
+      this.hud.render();
+      this.targeting.render();
+      this.diagnostics.render();
+      // The right-hand panel always follows the lock, so a new target opens its
+      // interior without the player having to ask.
+      if (this.targetPanel.ship !== this.targeting.target
+          && this.diagnostics.ship !== this.targeting.target) {
+        this.targetPanel.setShip(this.targeting.target);
+      }
+      this.targetPanel.render();
+      this.renderer.render(this.scene, this.camera);
+      this.hud.renderTargetView(this.renderer, this.scene);
+      this.staticRendered = !active;
     }
-    this.space.update(this.camera.position);
-    this.hud.render();
-    this.targeting.render();
-    this.diagnostics.render();
-    // The right-hand panel always follows the lock, so a new target opens its
-    // interior without the player having to ask.
-    if (this.targetPanel.ship !== this.targeting.target
-        && this.diagnostics.ship !== this.targeting.target) {
-      this.targetPanel.setShip(this.targeting.target);
-    }
-    this.targetPanel.render();
-    this.renderer.render(this.scene, this.camera);
-    // Target view, second pass, scissored into its frame on the same canvas.
-    // After the main render so it paints over it rather than under it.
-    this.hud.renderTargetView(this.renderer, this.scene);
   }
 
   _onResize() {
@@ -920,6 +933,9 @@ class Game {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.hud.resize();
+    this.diagnostics.resize();
+    this.targetPanel.resize();
+    this.targeting.resize();
   }
 }
 
