@@ -1504,6 +1504,8 @@ export class Systems {
     this.rejectFraction = ratedReject > 1e-9 ? reject / ratedReject : 0;
 
     for (const m of this.modules.values()) {
+      const heatAcc = m.heatAcc;
+      m.heatAcc = 0;
       if (m.destroyed) {
         // Wreckage still cools off; it just makes no more heat.
         m.temp = lerp(m.temp, AMBIENT_C, 1 - Math.exp(-0.25 * dt));
@@ -1515,8 +1517,7 @@ export class Systems {
       // circulates at whatever that tie is rated for.
       const flow = loop ? (this.online.coolant.get(node) || 0) : 0;
       // Heat in: duty-proportional, so a drive at 20 % throttle runs cool.
-      const heatIn = m.def.heat * m.duty + m.heatAcc;
-      m.heatAcc = 0;
+      const heatIn = m.def.heat * m.duty + heatAcc;
       // Heat exchangers are sized to the load they were built for, so at design
       // duty every module settles at roughly the same temperature above its
       // loop regardless of whether it is a 34 MW fusion plant or a sensor mast.

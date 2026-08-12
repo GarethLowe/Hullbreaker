@@ -490,6 +490,18 @@ ok('bow-gun hulls hold a zero fight aspect',
   ok('an untouched duty module does not make full-throttle heat', drive.duty === 0 && drive.temp <= before,
     `duty=${drive.duty} temp=${drive.temp.toFixed(2)}`);
 }
+{
+  const sys = fresh();
+  const drive = sys.get('thruster_A');
+  drive.destroyed = true;
+  drive.hp = 0;
+  drive.heatAcc = 1e9;
+  sys._tickThermal(1);
+  sys.repairModule(drive.id, 1);
+  const before = drive.temp;
+  sys._tickThermal(1);
+  ok('repairing a wreck does not release stale accumulated heat', drive.temp <= before);
+}
 
 // --- no single run may end a branch -----------------------------------------
 // Cut every conduit in turn and check nothing that needs service loses it.
