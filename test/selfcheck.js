@@ -186,6 +186,11 @@ ok('bow-gun hulls hold a zero fight aspect',
   sys.injectHeat('spine', 1e6);
   ok('beam heat keeps compartment temperature finite',
     Number.isFinite(section.temp) && section.temp > before, `temp ${section.temp}`);
+  const loop = sys.loops.get('l.core');
+  const loopBefore = loop.temp;
+  sys.injectHeat('spine', 1e6);
+  near('beam heat enters a shared coolant loop once per compartment', loop.temp - loopBefore,
+    (1e6 * 1e-5) / loop.capacity, 1e-9);
 }
 {
   for (const [id, hull] of Object.entries(HULLS)) {

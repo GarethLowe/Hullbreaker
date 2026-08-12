@@ -771,6 +771,7 @@ export class Systems {
       // should not come to the same temperature off the same joule.
       s.temp = Math.min(900, s.temp + sectionHeatDelta(s.def, joules));
     }
+    const loops = new Set();
     for (const m of this.modules.values()) {
       if (m.section !== sectionId || m.destroyed) {
         continue;
@@ -784,8 +785,11 @@ export class Systems {
       const node = m.def.needs && m.def.needs.coolant;
       const loop = node && this.loops.get(node);
       if (loop) {
-        loop.temp = Math.min(900, loop.temp + (joules * 1e-5) / loop.capacity);
+        loops.add(loop);
       }
+    }
+    for (const loop of loops) {
+      loop.temp = Math.min(900, loop.temp + (joules * 1e-5) / loop.capacity);
     }
   }
 
@@ -1319,6 +1323,7 @@ export class Systems {
       s.spill = clamp01(s.spill - 0.06 * intensity * dt);
       s.temp = Math.min(900, s.temp + 120 * intensity * dt);
 
+      const loops = new Set();
       for (const m of this.modules.values()) {
         if (m.section !== s.id || m.destroyed) {
           continue;
@@ -1328,7 +1333,7 @@ export class Systems {
         const node = m.def.needs && m.def.needs.coolant;
         const loop = node && this.loops.get(node);
         if (loop) {
-          loop.temp = Math.min(900, loop.temp + (FIRE_HEAT / loop.capacity) * intensity * dt);
+          loops.add(loop);
         }
         if (m.def.critical) {
           continue;
@@ -1342,6 +1347,9 @@ export class Systems {
         } else if (m.kind === 'fuel' && this.random() < 0.10 * intensity * dt) {
           this.damageModule(m.id, m.maxHp * 0.4, null, null);
         }
+      }
+      for (const loop of loops) {
+        loop.temp = Math.min(900, loop.temp + (FIRE_HEAT / loop.capacity) * intensity * dt);
       }
 
       // Spread: only into a neighbouring compartment that has air and something
