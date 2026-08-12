@@ -104,6 +104,7 @@ export class Diagnostics {
     this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
     this.hitsEl = document.getElementById(`${prefix}Hits`);
     this._hitsHtml = '';
+    this._crewHtml = '';
     this.visible = true;
     this._rows = new Map();
     this._builtFor = null;
@@ -413,7 +414,8 @@ export class Diagnostics {
     html += `<div class="crew-foot">SPARES ${spares}`
       + `  ·  COMPLEMENT ${ship.crew.headcount}/${ship.crew.complementMax}`
       + ` (${Math.round(ship.crew.complement * 100)}%)</div>`;
-    if (this.crewEl.innerHTML !== html) {
+    if (this._crewHtml !== html) {
+      this._crewHtml = html;
       this.crewEl.innerHTML = html;
     }
   }

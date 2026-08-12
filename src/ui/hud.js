@@ -92,6 +92,7 @@ export class HUD {
     this.canvas.style.width = `${window.innerWidth}px`;
     this.canvas.style.height = `${window.innerHeight}px`;
     this.dpr = dpr;
+    this.pipRect = this.el.pipFrame ? this.el.pipFrame.getBoundingClientRect() : null;
   }
 
   /** A one-off line in the message log. */
@@ -383,7 +384,7 @@ export class HUD {
       return;
     }
 
-    const r = this.el.pipFrame.getBoundingClientRect();
+    const r = this.pipRect;
     if (r.width < 8 || r.height < 8) {
       return;
     }

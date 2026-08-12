@@ -349,6 +349,17 @@ ok('bow-gun hulls hold a zero fight aspect',
 }
 
 {
+  const panel = Object.create(Diagnostics.prototype);
+  panel._crewHtml = '';
+  panel.crewEl = { set innerHTML(value) { this.written = value; } };
+  Object.defineProperty(panel.crewEl, 'innerHTML', { get() { throw new Error('layout read'); }, set(value) { this.written = value; } });
+  const ship = { crew: { roster: () => [], headcount: 1, complementMax: 1, complement: 1 },
+    sys: { breachCount: () => 0, breachArea: () => 0, totalSpares: () => 0 } };
+  Diagnostics.prototype._renderCrew.call(panel, ship);
+  ok('crew diagnostics cache their markup without reading it back from the DOM', !!panel._crewHtml);
+}
+
+{
   const donorParty = { size: 10, max: 10, at: 'donor' };
   const needParty = { size: 5.9, max: 6, at: 'need' };
   const donor = { max: 10, role: 'gunner', suited: false, parties: [donorParty] };
