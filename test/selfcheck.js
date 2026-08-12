@@ -310,6 +310,17 @@ ok('bow-gun hulls hold a zero fight aspect',
   ok('a breaking pilot does not fire on a stale contact', !pilot.triggers[1]);
 }
 
+{
+  const pilot = Object.create(Pilot.prototype);
+  pilot.target = {};
+  pilot.lastSeenAge = 1;
+  pilot.lastSeen = new Vector3(1, 2, 3);
+  pilot.aimModule = 'reactor';
+  const aim = new Vector3();
+  ok('a stale sensor contact lays guns on its last known position',
+    pilot._gunAim(1 / 60, aim).equals(pilot.lastSeen) && pilot.aimModule === null);
+}
+
 // --- physics and thermal invariants ----------------------------------------
 {
   const sys = fresh();

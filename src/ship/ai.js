@@ -150,9 +150,13 @@ export class Pilot {
    */
   _gunAim(dt, out) {
     const target = this.target;
-    if (!target || this.lastSeenAge > 0.4) {
+    if (!target) {
       this.aimModule = null;
       return null;
+    }
+    if (this.lastSeenAge > 0.4) {
+      this.aimModule = null;
+      return out.copy(this.lastSeen);
     }
     this.aimT -= dt;
     const chosen = this.aimModule && target.sys.get(this.aimModule);
