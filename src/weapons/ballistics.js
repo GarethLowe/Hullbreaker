@@ -651,8 +651,9 @@ export class Ballistics {
     const game = this.game;
     const hits = this._hits;
     hits.length = 0;
+    const excluded = ctx.excludeOwner === undefined ? ctx.owner : ctx.excludeOwner;
     for (const s of game.ships) {
-      if (s.disposed || s === ctx.owner) {
+      if (s.disposed || s === excluded) {
         continue;
       }
       s.gatherRayHits(origin, dir, maxDist, hits);
@@ -1050,6 +1051,7 @@ export class Ballistics {
         holeSize: 0.075,
         special: null,
         owner,
+        excludeOwner: null,
         caliber: 'shrapnel',
         impulse: 40,
       });

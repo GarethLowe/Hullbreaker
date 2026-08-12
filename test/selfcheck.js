@@ -1468,6 +1468,17 @@ ok('bow-gun hulls hold a zero fight aspect',
   ok('blast fragments explicitly make small holes', hit.holeSize === 0.075);
 }
 {
+  let checked = false;
+  const owner = { disposed: false, gatherRayHits() { checked = true; } };
+  const ball = Object.create(Ballistics.prototype);
+  ball.game = { ships: [owner] };
+  ball._hits = [];
+  ball._interceptedMissile = () => null;
+  ball.resolvePath(new Vector3(), new Vector3(0, 0, 1), 10,
+    { energy: 1, ap: 1, dwell: 1, owner, excludeOwner: null, caliber: 'shrapnel' });
+  ok('warhead fragments can hit the ship that intercepted them', checked);
+}
+{
   const sys = new Systems(HULLS.meridian, { game: { random: () => 0 } });
   const mag = sys.get('mag_fwd');
   sys.damageModule(mag.id, 4e5, null, null);
