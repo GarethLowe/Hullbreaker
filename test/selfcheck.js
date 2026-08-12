@@ -320,6 +320,12 @@ ok('bow-gun hulls hold a zero fight aspect',
   ok('collision de-penetration moves the lighter hull farther',
     Math.abs(light.pos.x) > Math.abs(heavy.pos.x - heavyStart) * 20);
 }
+{
+  const a = new Body(HULLS.sabre);
+  const b = new Body(HULLS.sabre);
+  resolveCollision(a, b);
+  ok('coincident hulls receive a deterministic separating nudge', a.pos.distanceTo(b.pos) > 0);
+}
 
 // --- networks ---------------------------------------------------------------
 {

@@ -461,12 +461,17 @@ export function resolveCollision(a, b, restitution = 0.25) {
   const rel = _colR;
 
   n.copy(b.pos).sub(a.pos);
-  const dist = n.length();
+  let dist = n.length();
   const minDist = a.radius + b.radius;
-  if (dist >= minDist || dist < 1e-4) {
+  if (dist >= minDist) {
     return null;
   }
-  n.multiplyScalar(1 / dist);          // contact normal, a -> b
+  if (dist < 1e-4) {
+    n.set(1, 0, 0);
+    dist = 0;
+  } else {
+    n.multiplyScalar(1 / dist);        // contact normal, a -> b
+  }
   rel.copy(b.vel).sub(a.vel);
   const closing = rel.dot(n);
   // Push apart even when separating, so ships never end up welded together.
