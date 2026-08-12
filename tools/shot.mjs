@@ -48,6 +48,8 @@ const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
     '--ignore-gpu-blocklist', '--no-sandbox'],
 });
+let info;
+try {
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
 const errors = [];
 page.on('console', (m) => {
@@ -71,7 +73,7 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(1200);
 
-const info = await page.evaluate(({ view, views, mount, chrome, enemy, hull }) => {
+info = await page.evaluate(({ view, views, mount, chrome, enemy, hull }) => {
   const g = window.game;
   if (!g) {
     return { found: false };
@@ -173,7 +175,9 @@ if (flag('fire')) {
   });
 }
 console.log(JSON.stringify({ info, errors: errors.slice(0, 10) }, null, 1));
-await browser.close();
+} finally {
+  await browser.close();
+}
 if (!info.found || errors.length > 0) {
   process.exitCode = 1;
 }
