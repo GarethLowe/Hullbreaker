@@ -194,7 +194,10 @@ export class FX {
     // the first time it is seen — a hitch on the first explosion, the first big
     // explosion, the first time two go off at once, and so on. A point light of
     // zero intensity contributes nothing to the image; a constant light count
-    // costs one shader compile for the entire session.
+    // costs one shader compile for the entire session. Measured 2026-08-12 in
+    // the five-ship SwiftShader scene at 480x270 after warm-up: 14 lights took
+    // 1.96 ms/render and 6 took 3.08 ms/render. Keep the headroom: reducing
+    // the pool has no demonstrated win and overwrites overlapping flashes.
     this.flashes = [];
     for (let i = 0; i < MAX_FLASHES; i++) {
       const l = new THREE.PointLight(0xffffff, 0, 160, 2);
