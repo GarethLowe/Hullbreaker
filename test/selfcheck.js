@@ -329,6 +329,17 @@ ok('bow-gun hulls hold a zero fight aspect',
 }
 
 {
+  const status = {};
+  const button = {};
+  const savedDocument = globalThis.document;
+  globalThis.document = { getElementById(id) { return id === 'startStatus' ? status : button; } };
+  Game.showFatal();
+  globalThis.document = savedDocument;
+  ok('a fatal startup error replaces the dead start action with visible status',
+    status.textContent.includes('STARTUP FAILED') && button.disabled);
+}
+
+{
   const donorParty = { size: 10, max: 10, at: 'donor' };
   const needParty = { size: 5.9, max: 6, at: 'need' };
   const donor = { max: 10, role: 'gunner', suited: false, parties: [donorParty] };

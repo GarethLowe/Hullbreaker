@@ -59,6 +59,13 @@ const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 
 export class Game {
+  static showFatal() {
+    const status = document.getElementById('startStatus');
+    const button = document.getElementById('splashStart');
+    status.textContent = 'STARTUP FAILED — RELOAD OR USE A SUPPORTED BROWSER';
+    button.disabled = true;
+  }
+
   constructor() {
     this.canvas = document.getElementById('view');
     this.renderer = new THREE.WebGLRenderer({
@@ -884,7 +891,7 @@ export class Game {
   }
 
   _frame() {
-    requestAnimationFrame(() => this._frame());
+    try {
     const now = performance.now();
     let wall = (now - this.last) / 1000;
     this.last = now;
@@ -943,6 +950,12 @@ export class Game {
       this.hud.renderTargetView(this.renderer, this.scene);
       this.staticRendered = !active;
     }
+    } catch (error) {
+      console.error(error);
+      Game.showFatal();
+      return;
+    }
+    requestAnimationFrame(() => this._frame());
   }
 
   _onResize() {
@@ -957,7 +970,12 @@ export class Game {
 }
 
 if (typeof window !== 'undefined') {
-  const game = new Game();
-  game.init();
-  window.game = game;
+  try {
+    const game = new Game();
+    game.init();
+    window.game = game;
+  } catch (error) {
+    console.error(error);
+    Game.showFatal();
+  }
 }
