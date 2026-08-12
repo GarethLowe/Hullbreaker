@@ -15,6 +15,10 @@ import { WEAPONS, AMMO, MOUNTS } from '../src/weapons/defs.js';
 import { Ballistics } from '../src/weapons/ballistics.js';
 import { Ship, MOUNT_DEPRESSION } from '../src/ship/ship.js';
 import { Pilot } from '../src/ship/ai.js';
+import { Scheduler } from '../src/core/ecs.js';
+import { canFireMount } from '../src/ship/gunnery.js';
+import { createLiveSection, sectionHeatDelta } from '../src/ship/hull-types.js';
+import { seededRandom } from '../src/core/rng.js';
 import { Euler, Quaternion, Vector3, Color } from 'three';
 import { PARTS, MUZZLES, PIVOTS } from '../src/world/kit.js';
 import {
@@ -61,6 +65,42 @@ function run(sys, seconds, crew = null) {
 }
 
 const fresh = (id = 'meridian') => new Systems(HULLS[id]);
+
+// The scheduler deliberately owns order only. Entity lifetime stays with Game,
+// preventing a deferred registry from leaving retired ships active for a tick.
+{
+  const scheduler = new Scheduler();
+  const order = [];
+  scheduler.addSystem('late', () => order.push('late'), 20);
+  scheduler.addSystem('early', () => order.push('early'), 10);
+  scheduler.run({});
+  ok('the scheduler runs systems in declared order', order.join(',') === 'early,late');
+}
+
+{
+  const ready = { held: true, live: true, bears: true, cooling: false, charged: true };
+  ok('a gunnery gate accepts a ready mount', canFireMount(ready));
+  for (const key of Object.keys(ready)) {
+    const missing = key === 'cooling' ? true : false;
+    ok(`a gunnery gate rejects a mount without ${key}`,
+      !canFireMount({ ...ready, [key]: missing }));
+  }
+}
+
+{
+  const def = { id: 'test', label: 'TEST', volume: 100, plateHp: 1, frameHp: 1 };
+  near('section heat uses authored volume', sectionHeatDelta(def, 1e6), 360, 1e-9);
+  // Regression: the extraction once hardcoded 20 while everything else in the
+  // ship initializes and relaxes to AMBIENT_C = 18.
+  ok('a live section spawns at the ambient it cools toward',
+    createLiveSection(def, 18).temp === 18);
+}
+
+{
+  const a = seededRandom(1729);
+  const b = seededRandom(1729);
+  ok('a simulation RNG replays its seed', [a(), a(), a()].join(',') === [b(), b(), b()].join(','));
+}
 
 // --- hull tables ------------------------------------------------------------
 for (const [id, h] of Object.entries(HULLS)) {

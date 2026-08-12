@@ -100,6 +100,7 @@ const _want = new THREE.Vector3();
 export class Ballistics {
   constructor(game) {
     this.game = game;
+    this.random = game.random || Math.random;
     this.bolts = [];
     this.missiles = [];
     this.beams = [];
@@ -136,7 +137,7 @@ export class Ballistics {
    * ammunition types — it just reads the numbers the round arrived with.
    */
   spawnBolt(ship, origin, dir, inherit, weapon, ammo) {
-    coneDirection(dir, weapon.spread || 0, _d);
+    coneDirection(dir, weapon.spread || 0, _d, this.random);
     const vel = _d.clone().multiplyScalar(weapon.muzzleVel).add(inherit);
     this.bolts.push({
       pos: origin.clone(),
@@ -417,7 +418,7 @@ export class Ballistics {
           b.pos.copy(res.ricochet.point);
           b.prev.copy(res.ricochet.point);
           b.vel.reflect(res.ricochet.normal);
-          coneDirection(_t.copy(b.vel).normalize(), 0.25, _d);
+          coneDirection(_t.copy(b.vel).normalize(), 0.25, _d, this.random);
           b.energy = res.energy;
           b.vel.copy(_d).multiplyScalar(
             b.mass > 0 ? Math.sqrt((2 * b.energy) / b.mass) : b.vel.length() * 0.7,
@@ -1032,10 +1033,10 @@ export class Ballistics {
   /** Shrapnel fan used by explosions. Cheap rays with a small budget each. */
   castShrapnel(center, count, energyEach, owner) {
     for (let i = 0; i < count; i++) {
-      randomDirection(_d);
+      randomDirection(_d, this.random);
       _o.copy(center).addScaledVector(_d, 0.4);
       this.resolvePath(_o, _d, 90, {
-        energy: energyEach * rand(0.6, 1.4),
+        energy: energyEach * rand(0.6, 1.4, this.random),
         ap: 1.2,
         // Fragments are small, fast and arrive as a swarm of tiny spikes.
         dwell: 8e-4,

@@ -11,7 +11,7 @@ This began as a read-only review. The implementation pass is tracked below; reco
 ## Implementation progress
 
 Last updated: 2026-08-12
-Implementation commit: f22d1e7
+Implementation commits: f22d1e7 (P0–P2 fixes), plus the R-23 through R-33 backlog change set this update accompanies
 
 ### Completed
 
@@ -19,18 +19,22 @@ Implementation commit: f22d1e7
 - [x] R-06 through R-09: corrected COM-relative collision bounds, seeker acquisition/FOV loss, wave teardown ordering, and simulation-time gameplay decisions.
 - [x] R-10 through R-12: added pointer-lock error handling, keyboard-accessible start/resume controls, responsive/DPR/reduced-motion improvements, and upgraded audited development dependencies.
 - [x] R-13 through R-22: made browser smoke failures fail closed, added deterministic test seeds, CI, Node requirements, loopback no-build serving, documentation updates, inactive-frame throttling, and a production startup smoke check.
+- [x] R-23: replaced the ECS with a bare ordered Scheduler; Game.ships and Game.pilots are the single lifecycle authority, disposed synchronously through Game._disposeShip.
+- [x] R-24: first staged extraction — the pure gunnery firing gate lives in src/ship/gunnery.js with direct tests; further separation continues alongside future domain changes.
+- [x] R-25: first split — authored hull specs moved to src/ship/hull-data.js; hulls.js retains compilation and validation only.
+- [x] R-26: first typed boundary — src/ship/hull-types.js carries checked JSDoc typedefs for hull sections and live state; `npm run typecheck:hull` gates it.
+- [x] R-27: documented the power-versus-energy model in docs/power-units.md (beam draw is MW, discrete draw is MJ per shot); field renames deferred there deliberately.
+- [x] R-28: outcome-affecting randomness routes through game.random (src/core/rng.js, seeded LCG); trace exports carry the seed; cosmetic effects stay on Math.random.
 - [x] R-29: removed confirmed unused state, exports, and helpers identified in the review.
 - [x] R-30 and R-31: corrected stale operational documentation and made production source maps opt-in by removing them from the default build.
+- [x] R-32: strict CSP documented in docs/deployment-security.md and injected into the built page by vite.config.js. It must not live in source index.html: a meta policy there blocks the inline import map and kills the no-build path (measured). The serve:nobuild listen argument also needed the tcp:// scheme this serve version requires.
+- [x] R-33: kept the bounded array and corrected the "ring buffer" terminology in trace.js; profiling has shown no cost worth machinery.
 
 ### Pending — requires a separate, scoped change
 
-- [ ] R-23: make ECS or the current ordered scheduler the single lifecycle authority. The immediate wave-transition bug is fixed, but the duplicate ownership model remains.
-- [ ] R-24 and R-25: incrementally separate simulation, rendering, effects, and authored hull data; split oversized modules only alongside domain changes that establish testable seams.
-- [ ] R-26: introduce gradual JSDoc/checkJs typing at authored/live-state boundaries.
-- [ ] R-27: decide and document the power-versus-energy model before renaming fields or changing balance behavior.
-- [ ] R-28: route outcome-affecting simulation randomness through an injectable seeded RNG; the test harness is deterministic, but runtime simulation is not yet replayable.
-- [ ] R-32: add an explicit deployment CSP/self-hosted asset policy if the game is publicly hosted.
-- [ ] R-33: profile trace storage before replacing its bounded array with a circular buffer.
+- [ ] R-24 and R-25 continue incrementally: separate simulation from rendering/effects at the Ship boundary and split systems.js/selfcheck.js only alongside domain changes that establish testable seams.
+- [ ] R-26 continues: extend checked typing to weapon definitions and projectile state once the hull boundary has proven out.
+- [ ] R-27 follow-up: split weapon.draw into powerMW/shotEnergyMJ with simultaneous-fire accounting tests, without rebalancing values.
 
 ### Deferred by evidence
 

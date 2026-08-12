@@ -33,41 +33,41 @@ export function damp(current, target, rate, dt) {
   return lerp(current, target, 1 - Math.exp(-rate * dt));
 }
 
-export function rand(lo = 0, hi = 1) {
-  return lo + Math.random() * (hi - lo);
+export function rand(lo = 0, hi = 1, random = Math.random) {
+  return lo + random() * (hi - lo);
 }
 
-export function randInt(lo, hi) {
-  return Math.floor(rand(lo, hi + 1));
+export function randInt(lo, hi, random = Math.random) {
+  return Math.floor(rand(lo, hi + 1, random));
 }
 
-export function pick(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
+export function pick(arr, random = Math.random) {
+  return arr[Math.floor(random() * arr.length)];
 }
 
 /** Uniform point on the unit sphere. */
-export function randomDirection(out = new THREE.Vector3()) {
-  const z = rand(-1, 1);
-  const a = rand(0, Math.PI * 2);
+export function randomDirection(out = new THREE.Vector3(), random = Math.random) {
+  const z = rand(-1, 1, random);
+  const a = rand(0, Math.PI * 2, random);
   const r = Math.sqrt(Math.max(0, 1 - z * z));
   return out.set(r * Math.cos(a), r * Math.sin(a), z);
 }
 
 /** Random unit vector inside a cone of half-angle `spread` around `dir`. */
-export function coneDirection(dir, spread, out = new THREE.Vector3()) {
+export function coneDirection(dir, spread, out = new THREE.Vector3(), random = Math.random) {
   if (spread <= 0) {
     return out.copy(dir);
   }
   const t = _cone1;
-  randomDirection(t);
+  randomDirection(t, random);
   // Reject the degenerate parallel case, then build a perpendicular basis.
   if (Math.abs(t.dot(dir)) > 0.99) {
     t.set(dir.z, dir.x, dir.y);
   }
   const side = _cone2.crossVectors(dir, t).normalize();
   const up = _cone3.crossVectors(side, dir).normalize();
-  const ang = spread * Math.sqrt(Math.random());
-  const phi = rand(0, Math.PI * 2);
+  const ang = spread * Math.sqrt(random());
+  const phi = rand(0, Math.PI * 2, random);
   return out
     .copy(dir)
     .multiplyScalar(Math.cos(ang))

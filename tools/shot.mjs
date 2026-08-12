@@ -44,6 +44,7 @@ const VIEWS = {
 };
 
 const browser = await chromium.launch({
+  headless: true,
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
     '--ignore-gpu-blocklist', '--no-sandbox'],
 });
@@ -58,7 +59,16 @@ page.on('pageerror', (e) => errors.push(`PAGEERROR ${e.message}`));
 
 await page.goto(opt('url', 'http://127.0.0.1:5174/'), { waitUntil: 'networkidle', timeout: 60000 });
 await page.waitForTimeout(3500);
-await page.locator('#splashStart').click().catch(() => {});
+await page.evaluate(() => {
+  // The smoke run needs simulation ticks, not pointer lock. Avoid the start
+  // button because it requests pointer lock and can capture a real cursor.
+  const g = window.game;
+  if (g) {
+    g.started = true;
+    g.paused = false;
+    document.getElementById('splash').classList.add('hidden');
+  }
+});
 await page.waitForTimeout(1200);
 
 const info = await page.evaluate(({ view, views, mount, chrome, enemy, hull }) => {
@@ -144,17 +154,23 @@ const info = await page.evaluate(({ view, views, mount, chrome, enemy, hull }) =
 });
 
 if (flag('fire')) {
-  // Hold both triggers so the frame catches guns mid-recoil with their
-  // emitters lit, which is the state that never shows up in a static preview.
-  await page.mouse.move(800, 450);
-  await page.mouse.down({ button: 'left' });
-  await page.mouse.down({ button: 'right' });
+  // Hold both virtual triggers without moving or capturing a browser cursor.
+  // Drive input.buttons, the polled source: PlayerPilot.readInput overwrites
+  // player.firing from it every frame, so writing player.firing directly is
+  // erased before a single simulation step can see it (measured: firing read
+  // back [false,false] 600 ms after being set).
+  await page.evaluate(() => {
+    window.game.input.buttons[0] = true;
+    window.game.input.buttons[2] = true;
+  });
 }
 await page.waitForTimeout(flag('fire') ? 2600 : 2200);
 await page.screenshot({ path: out });
 if (flag('fire')) {
-  await page.mouse.up({ button: 'left' }).catch(() => {});
-  await page.mouse.up({ button: 'right' }).catch(() => {});
+  await page.evaluate(() => {
+    window.game.input.buttons[0] = false;
+    window.game.input.buttons[2] = false;
+  });
 }
 console.log(JSON.stringify({ info, errors: errors.slice(0, 10) }, null, 1));
 await browser.close();

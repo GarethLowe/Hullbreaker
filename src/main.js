@@ -5,19 +5,19 @@
 // correct projectile segments, deterministic thermal integration) with the
 // camera and HUD decoupled at display rate.
 //
-// The ECS owns two things: the ordered system schedule for one simulation step,
-// and the lifetime of scene-scope entities. Ship interiors stay in plain
-// objects — they are dense graphs walked every tick and would gain nothing from
-// archetype iteration. Cross-system messaging funnels through the small
-// callback surface near the bottom of this file, so no subsystem ever reaches
-// into another.
+// The scheduler owns the ordered system schedule for one simulation step. Game
+// owns scene entity lifetime through its ships and pilots collections, so there
+// is no deferred registry that can disagree with simulation iteration. Ship
+// interiors stay in plain objects — they are dense graphs walked every tick.
+// Cross-system messaging funnels through the small callback surface near the
+// bottom of this file, so no subsystem ever reaches into another.
 //
 // There is no physics library. Ships are rigid bodies integrated in flight.js
 // and every ray test is analytic against the hull tables, so the whole
 // simulation is code you can read.
 // -----------------------------------------------------------------------------
 import * as THREE from 'three';
-import { ECS } from './core/ecs.js';
+import { Scheduler } from './core/ecs.js';
 import { Input } from './core/input.js';
 import { Trace } from './core/trace.js';
 import { AudioEngine } from './core/audio.js';
@@ -35,6 +35,7 @@ import { HUD } from './ui/hud.js';
 import { Targeting } from './ui/targeting.js';
 import { Diagnostics } from './ui/diagnostics.js';
 import { clamp01, rand, randInt, pick, randomDirection } from './core/mathx.js';
+import { seededRandom } from './core/rng.js';
 
 /**
  * Real-time cadence of the simulation. The world is stepped this often per
@@ -82,7 +83,8 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(
       68, window.innerWidth / window.innerHeight, CAMERA_NEAR, CAMERA_FAR,
     );
-    this.ecs = new ECS();
+    this.scheduler = new Scheduler();
+    this.random = seededRandom();
     this.audio = new AudioEngine();
     this.input = new Input(this.canvas);
     this.hulls = HULLS;
@@ -123,27 +125,6 @@ class Game {
 
     this._spawnPlayer('meridian');
     this._registerSystems();
-
-    this.ecs.onDestroy((id, comps) => {
-      const c = comps.get('ship');
-      if (c && c.ship) {
-        const i = this.ships.indexOf(c.ship);
-        if (i >= 0) {
-          this.ships.splice(i, 1);
-        }
-        this.pilots.delete(c.ship);
-        if (this.targeting.target === c.ship) {
-          this.targeting.setTarget(null);
-        }
-        if (this.diagnostics.ship === c.ship) {
-          this.diagnostics.setShip(this.player ? this.player.ship : null);
-        }
-        if (this.targetPanel.ship === c.ship) {
-          this.targetPanel.setShip(null);
-        }
-        c.ship.dispose();
-      }
-    });
 
     window.addEventListener('resize', () => this._onResize());
     window.addEventListener('keydown', (e) => this._onOverKey(e));
@@ -205,13 +186,31 @@ class Game {
   _addShip(hullId, opts) {
     const ship = new Ship(this, hullId, opts);
     this.ships.push(ship);
-    const id = this.ecs.create('ship');
-    this.ecs.add(id, 'ship', { ship });
-    ship.entity = id;
     if (!opts.isPlayer) {
       this.pilots.set(ship, new Pilot(ship, this));
     }
     return ship;
+  }
+
+  _disposeShip(ship) {
+    if (ship.disposed) {
+      return;
+    }
+    const i = this.ships.indexOf(ship);
+    if (i >= 0) {
+      this.ships.splice(i, 1);
+    }
+    this.pilots.delete(ship);
+    if (this.targeting.target === ship) {
+      this.targeting.setTarget(null);
+    }
+    if (this.diagnostics.ship === ship) {
+      this.diagnostics.setShip(this.player ? this.player.ship : null);
+    }
+    if (this.targetPanel.ship === ship) {
+      this.targetPanel.setShip(null);
+    }
+    ship.dispose();
   }
 
   /**
@@ -249,9 +248,9 @@ class Game {
             : (w <= 10 ? ['halberd', 'meridian', 'meridian']
               : ['halberd', 'meridian', 'meridian', 'bastion']))));
     for (let i = 0; i < n; i++) {
-      const hullId = pick(pool);
-      randomDirection(_v);
-      _v.multiplyScalar(rand(ENGAGEMENT_RANGE * 1.5, ENGAGEMENT_RANGE * 2.8));
+      const hullId = pick(pool, this.random);
+      randomDirection(_v, this.random);
+      _v.multiplyScalar(rand(ENGAGEMENT_RANGE * 1.5, ENGAGEMENT_RANGE * 2.8, this.random));
       _v.add(this.player.ship.position);
       _q.setFromUnitVectors(
         new THREE.Vector3(0, 0, 1),
@@ -259,10 +258,10 @@ class Game {
       );
       this._addShip(hullId, {
         faction: 'hostile',
-        name: `${pick(CALLSIGNS)}-${randInt(10, 99)}`,
+        name: `${pick(CALLSIGNS, this.random)}-${randInt(10, 99, this.random)}`,
         position: _v.clone(),
         quaternion: _q.clone(),
-        velocity: _v2.clone().multiplyScalar(rand(20, 50)),
+        velocity: _v2.clone().multiplyScalar(rand(20, 50, this.random)),
       });
     }
     this.hud.warn(`WAVE ${this.wave} — ${n} CONTACT${n > 1 ? 'S' : ''}`);
@@ -288,10 +287,8 @@ class Game {
       ? { primary: this.player.primary, secondary: this.player.secondary }
       : null;
     for (const s of [...this.ships]) {
-      this.ecs.destroy(s.entity);
+      this._disposeShip(s);
     }
-    this.ships.length = 0;
-    this.pilots.clear();
     this.ballistics.clear();
     this.fx.clear();
     this.targeting.setTarget(null);
@@ -361,13 +358,9 @@ class Game {
   skipWave() {
     for (const s of [...this.ships]) {
       if (!s.isPlayer) {
-        this.ecs.destroy(s.entity);
+        this._disposeShip(s);
       }
     }
-    // Game.ships and Game.pilots are pruned by the ECS destroy handler. Flush
-    // before deploying the replacement wave so retired enemies cannot update,
-    // fire, or collide once more.
-    this.ecs.flush();
     this.ballistics.clear();
     this.startWave(this.wave + 1);
     this.hud.nudge(`SKIPPED TO WAVE ${this.wave}`, 1.6);
@@ -376,15 +369,15 @@ class Game {
   // -- system schedule -------------------------------------------------------
 
   _registerSystems() {
-    const ecs = this.ecs;
+    const scheduler = this.scheduler;
 
-    ecs.addSystem('intent', ({ dt }) => {
+    scheduler.addSystem('intent', ({ dt }) => {
       if (this.player && !this.player.ship.disposed) {
         this.player.update(dt);
       }
     }, 10);
 
-    ecs.addSystem('brains', ({ dt }) => {
+    scheduler.addSystem('brains', ({ dt }) => {
       for (const [ship, pilot] of this.pilots) {
         if (!ship.disposed && !ship.dead) {
           pilot.update(dt);
@@ -401,13 +394,13 @@ class Game {
       }
     }, 20);
 
-    ecs.addSystem('ships', ({ dt }) => {
+    scheduler.addSystem('ships', ({ dt }) => {
       for (const s of this.ships) {
         s.update(dt);
       }
     }, 30);
 
-    ecs.addSystem('collide', () => {
+    scheduler.addSystem('collide', () => {
       // Ships are few; the pair loop is honest and never the bottleneck.
       for (let i = 0; i < this.ships.length; i++) {
         for (let j = i + 1; j < this.ships.length; j++) {
@@ -434,26 +427,26 @@ class Game {
       }
     }, 40);
 
-    ecs.addSystem('ballistics', ({ dt }) => {
+    scheduler.addSystem('ballistics', ({ dt }) => {
       this.ballistics.update(dt);
     }, 50);
 
-    ecs.addSystem('fx', ({ dt }) => {
+    scheduler.addSystem('fx', ({ dt }) => {
       this.fx.update(dt);
     }, 60);
 
-    ecs.addSystem('targeting', ({ dt }) => {
+    scheduler.addSystem('targeting', ({ dt }) => {
       this.targeting.update(dt);
       this.hud.update(dt);
     }, 70);
 
-    ecs.addSystem('director', ({ dt }) => {
+    scheduler.addSystem('director', ({ dt }) => {
       this._director(dt);
     }, 80);
 
     // Last in the step, so a sample is the settled state of the tick rather
     // than a half-updated one. Costs nothing until `game.trace.start()`.
-    ecs.addSystem('trace', ({ dt }) => {
+    scheduler.addSystem('trace', ({ dt }) => {
       this.trace.tick(dt);
     }, 90);
   }
@@ -522,6 +515,7 @@ class Game {
   _director(dt) {
     // Retire wrecks, then decide whether it is time for more company.
     let hostiles = 0;
+    const retired = [];
     for (const s of this.ships) {
       if (s.disposed) {
         continue;
@@ -556,11 +550,15 @@ class Game {
           // it stops being convenient.
           this.fx.shipBreakup(s);
           this.audio.reactor(s.position, 1.4);
-          this.ecs.destroy(s.entity);
+          retired.push(s);
         }
       } else if (s.faction === 'hostile' && !s.derelict) {
         hostiles++;
       }
+    }
+
+    for (const s of retired) {
+      this._disposeShip(s);
     }
 
     if (this.player && this.player.ship.dead && !this.over) {
@@ -725,8 +723,8 @@ class Game {
     ship.autopilot.cmd.throttle = 0;
     ship.autopilot.cmd.assist = false;
     ship.body.omega.multiplyScalar(1);
-    randomDirection(_v);
-    ship.body.omega.addScaledVector(_v, rand(0.15, 0.6));
+    randomDirection(_v, this.random);
+    ship.body.omega.addScaledVector(_v, rand(0.15, 0.6, this.random));
     if (ship.faction === 'hostile') {
       // A hulk already scored when it went adrift; finishing it must not pay
       // twice.
@@ -824,11 +822,11 @@ class Game {
       this.hud.nudge(this.audio.toggleMute() ? 'AUDIO MUTED' : 'AUDIO ON', 1.2);
     }
     if (input.pressed('KeyG')) {
-      randomDirection(_v);
+      randomDirection(_v, this.random);
       _v.multiplyScalar(ENGAGEMENT_RANGE).add(this.player.ship.position);
-      this._addShip(pick(HULL_IDS), {
+      this._addShip(pick(HULL_IDS, this.random), {
         faction: 'hostile',
-        name: `${pick(CALLSIGNS)}-${randInt(10, 99)}`,
+        name: `${pick(CALLSIGNS, this.random)}-${randInt(10, 99, this.random)}`,
         position: _v.clone(),
       });
       this.hud.nudge('TEST CONTACT DEPLOYED', 1.4);
@@ -891,7 +889,7 @@ class Game {
         this.accumulator -= STEP_INTERVAL;
         steps++;
         this.simTime += dt;
-        this.ecs.run({ dt, game: this });
+        this.scheduler.run({ dt, game: this });
       }
       if (steps === MAX_STEPS) {
         this.accumulator = 0;

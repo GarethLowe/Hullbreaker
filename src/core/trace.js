@@ -7,7 +7,7 @@
 // dry and the pipe was welded and it never came back. State you can poke at
 // tells you where you ended up. It cannot tell you how.
 //
-// So this samples the whole ship on a ring buffer and — the part that actually
+// So this samples the whole ship in a bounded array and — the part that actually
 // matters — diffs each sample against the last, so the output is a TIMELINE of
 // transitions rather than a wall of numbers. "t=143.2 l.batA level 0.41 -> 0.00"
 // is the bug report.
@@ -172,6 +172,7 @@ export class Trace {
         note: 'modules appear only while NOT nominal; absence means healthy',
       },
       hull: this.game.player ? this.game.player.ship.hull.id : null,
+      seed: this.game.random ? this.game.random.seed : null,
       seconds: r2(this.t),
       samples: this.samples,
     }, null, 1)], { type: 'application/json' });

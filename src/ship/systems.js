@@ -26,6 +26,7 @@
 // on its own and the diagnostics UI can read it directly.
 // -----------------------------------------------------------------------------
 import { NETS, FACETS, MATERIALS, HOIST_FILL_SECONDS } from './hulls.js';
+import { createLiveSection, sectionHeatDelta } from './hull-types.js';
 import { clamp, clamp01, lerp } from '../core/mathx.js';
 import {
   captureState, applyState, captureMap, applyMap, captureRecord, applyRecord,
@@ -284,10 +285,8 @@ const DISSIPATION_PER_RADIATOR_FRAC = 0.266;
 const DUTY_KINDS = new Set(['thruster', 'rcs', 'hardpoint']);
 
 /**
- * Thermal-mass references for `injectHeat`. Deposited energy raises a thing's
- * temperature in inverse proportion to how much of it there is; these fix the
- * scale, so a module or compartment of this size behaves exactly as the old
- * unscaled constants did and everything larger heats more slowly.
+ * Thermal-mass reference for module heat injection. Deposited energy raises a
+ * thing's temperature in inverse proportion to how much of it there is.
  *
  * `maxHp` is the stand-in for a module's bulk — it already tracks how big and
  * how substantial a fitting is across the roster, from a 1.5 MJ conduit to a
@@ -295,7 +294,6 @@ const DUTY_KINDS = new Set(['thruster', 'rcs', 'hardpoint']);
  * the hull tables purely to feed one equation.
  */
 const REF_BULK = 1.0e7;
-const REF_VOLUME = 900;
 
 /**
  * Waste heat a projector takes per watt its facets dissipate. Chosen so full
@@ -310,6 +308,7 @@ export class Systems {
   constructor(hull, ship = null) {
     this.hull = hull;
     this.ship = ship;
+    this.random = ship && ship.game.random ? ship.game.random : Math.random;
     this.events = [];
 
     // -- modules -------------------------------------------------------------
@@ -375,28 +374,10 @@ export class Systems {
     }
 
     // -- compartments --------------------------------------------------------
+    /** @type {Map<string, import('./hull-types.js').LiveSection>} */
     this.sections = new Map();
     for (const def of hull.sections) {
-      this.sections.set(def.id, {
-        def,
-        id: def.id,
-        label: def.label,
-        plateHp: def.plateHp,
-        plateMax: def.plateHp,
-        breached: false,
-        /** Open hole area in square metres. Drives the venting rate. */
-        breachSize: 0,
-        frameHp: def.frameHp,
-        frameMax: def.frameHp,
-        frameBroken: false,
-        atmo: 1,
-        /** Spilled fuel/coolant pooling here: the fuel for a fire. */
-        spill: 0,
-        fire: 0,          // remaining fire fuel, seconds
-        fireSpreadT: 0,
-        temp: AMBIENT_C,
-        venting: false,   // crew-commanded emergency vent
-      });
+      this.sections.set(def.id, createLiveSection(def, AMBIENT_C));
     }
 
     // -- coolant loops -------------------------------------------------------
@@ -549,7 +530,7 @@ export class Systems {
     // the box first — the risk scales with how much is still in it.
     if (m.kind === 'magazine' && m.hp > 0 && m.rounds > 0) {
       const risk = clamp01(joules / 4e5) * clamp01(m.rounds / Math.max(m.def.rounds, 1)) * 0.30;
-      if (Math.random() < risk) {
+      if (this.random() < risk) {
         this._cookOff(m, hitPoint);
       }
     }
@@ -618,7 +599,7 @@ export class Systems {
       // point fire is not an event, it is the ship's paint. A quarter is the
       // ceiling: a compartment under sustained fire catches soon enough, and
       // taking a couple of rounds usually costs you nothing but plate.
-      if (Math.random() < Math.min(0.25, rupture * 0.45)) {
+      if (this.random() < Math.min(0.25, rupture * 0.45)) {
         this.ignite(sectionId, 5 + 14 * s.spill);
       }
     }
@@ -787,8 +768,7 @@ export class Systems {
       // Per unit of compartment, not per compartment. A dreadnought's drive
       // cluster is a hundred times the volume of a picket's avionics bay and
       // should not come to the same temperature off the same joule.
-      s.temp = Math.min(900, s.temp + (joules * 4e-5)
-        * (REF_VOLUME / Math.max(s.def.volume, 1)));
+      s.temp = Math.min(900, s.temp + sectionHeatDelta(s.def, joules));
     }
     for (const m of this.modules.values()) {
       if (m.section !== sectionId || m.destroyed) {
@@ -847,7 +827,7 @@ export class Systems {
       case 'magazine':
         // A destroyed magazine nearly always goes up: the box is what was
         // keeping the propellant apart.
-        if (m.rounds > 0 && Math.random() < 0.75) {
+        if (m.rounds > 0 && this.random() < 0.75) {
           this._cookOff(m, at);
         } else {
           this.events.push({ type: 'moduleKill', at, dir, module: m });
@@ -1358,9 +1338,9 @@ export class Systems {
         // casualty, which is why a fire reliably costs you a network.
         if (m.def.mat === 'soft') {
           this.damageModule(m.id, m.maxHp * FIRE_BURN_FRAC * intensity * dt, null, null);
-        } else if (m.kind === 'magazine' && Math.random() < 0.18 * intensity * dt) {
+        } else if (m.kind === 'magazine' && this.random() < 0.18 * intensity * dt) {
           this._cookOff(m, null);
-        } else if (m.kind === 'fuel' && Math.random() < 0.10 * intensity * dt) {
+        } else if (m.kind === 'fuel' && this.random() < 0.10 * intensity * dt) {
           this.damageModule(m.id, m.maxHp * 0.4, null, null);
         }
       }
@@ -1375,7 +1355,7 @@ export class Systems {
           if (!n || n.fire > 0 || n.atmo < 0.4 || n.spill < 0.12) {
             continue;
           }
-          if (Math.random() < 0.4) {
+          if (this.random() < 0.4) {
             this.ignite(nId, s.fire * 0.6);
           }
         }
@@ -1810,7 +1790,7 @@ export class Systems {
       return;
     }
     for (const c of this.conduits) {
-      if (!c.destroyed || c.def.net !== 'power' || Math.random() > ARC_CHANCE * dt) {
+      if (!c.destroyed || c.def.net !== 'power' || this.random() > ARC_CHANCE * dt) {
         continue;
       }
       const victims = [];
@@ -1840,11 +1820,11 @@ export class Systems {
         victims.push(m);
       }
       if (victims.length > 0) {
-        const v = victims[Math.floor(Math.random() * victims.length)];
+        const v = victims[Math.floor(this.random() * victims.length)];
         this.damageModule(v.id, v.maxHp * ARC_DAMAGE_FRAC, null, null);
       }
       // An arc next to spilled fuel is one of the two ways a fire starts.
-      if (Math.random() < 0.35) {
+      if (this.random() < 0.35) {
         this.ignite(c.section, 7);
       }
     }
@@ -1860,7 +1840,7 @@ export class Systems {
       if (s) {
         s.temp = Math.min(900, s.temp + 220 * dt);
         s.spill = clamp01(s.spill + 0.3 * dt);
-        if (Math.random() < 1.4 * dt) {
+        if (this.random() < 1.4 * dt) {
           this.ignite(m.section, 10);
         }
       }
@@ -1869,7 +1849,7 @@ export class Systems {
       // you want to be sure.
       if (m.breachT > 2.4) {
         m.breached = false;
-        if (Math.random() < BREACH_DETONATE_CHANCE) {
+        if (this.random() < BREACH_DETONATE_CHANCE) {
           m.detonated = true;
           this.events.push({ type: 'detonate', module: m, at: null });
         } else {

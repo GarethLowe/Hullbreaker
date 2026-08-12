@@ -21,6 +21,7 @@ import { MATERIALS, FACETS } from './hulls.js';
 import { Systems } from './systems.js';
 import { Crew } from './crew.js';
 import { Body, Autopilot, FORWARD } from './flight.js';
+import { canFireMount } from './gunnery.js';
 import { Decals } from '../fx/decals.js';
 import {
   buildMount, mountFrame, mountStyle, partGeometry, shellGeometry, skinFraction,
@@ -1466,10 +1467,13 @@ export class Ship {
         }
 
         mount.firing = false;
-        if (!held || !live || !mount.bears || mount.cool > 0) {
-          continue;
-        }
-        if (!this._canDraw(w.draw)) {
+        if (!canFireMount({
+          held,
+          live,
+          bears: mount.bears,
+          cooling: mount.cool > 0,
+          charged: this._canDraw(w.draw),
+        })) {
           continue;
         }
         if (!this._takeAmmo(mount)) {
@@ -1486,8 +1490,8 @@ export class Ship {
     }
   }
 
-  _canDraw(mj) {
-    return this.sys.capStore >= mj || this.sys.supply > 0.5;
+  _canDraw(energyMJ) {
+    return this.sys.capStore >= energyMJ || this.sys.supply > 0.5;
   }
 
   _takeAmmo(mount) {

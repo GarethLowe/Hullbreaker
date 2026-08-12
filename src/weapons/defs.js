@@ -45,7 +45,7 @@ export const WEAPONS = {
     // couples into a shield more comfortably than that.
     dwell: 1 / 60,
     heat: 620,               // per second, and it will cook its own mount
-    draw: 30,                // MW while firing
+    draw: 30,                // MW while firing; see docs/power-units.md
     ammo: 0,
     tracer: 0xff5a8c,
     width: 0.6,
@@ -66,7 +66,7 @@ export const WEAPONS = {
     ap: 0,                   // does not penetrate anything: it induces
     dump: 0,
     heat: 380,
-    draw: 42,
+    draw: 42,                // MJ per shot; see docs/power-units.md
     ammo: 0,
     spread: 0.003,
     tracer: 0xbb7cff,
