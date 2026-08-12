@@ -134,6 +134,9 @@ export class Diagnostics {
     if (this.root) {
       this.root.classList.toggle('hidden', !ship || !this.visible);
     }
+    if (ship && this.visible) {
+      this.resize();
+    }
   }
 
   /** Scrolls the module tree by roughly half a panel. See Game._hotkeys. */
@@ -148,6 +151,9 @@ export class Diagnostics {
     this.visible = !this.visible;
     if (this.root) {
       this.root.classList.toggle('hidden', !this.ship || !this.visible);
+    }
+    if (this.ship && this.visible) {
+      this.resize();
     }
     return this.visible;
   }
