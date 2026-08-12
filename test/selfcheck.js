@@ -190,6 +190,16 @@ for (const [id, h] of Object.entries(HULLS)) {
     before.z + expected.z * dt, 1e-10);
 }
 {
+  const body = new Body(HULLS.sabre);
+  body.omega.set(1.5, 0.2, 0.3);
+  const momentum = body.omega.clone().multiply(body.inertia).length();
+  for (let t = 0; t < 360; t += 1 / 60) {
+    body.integrate(1 / 60);
+  }
+  near('torque-free rotation preserves angular momentum magnitude',
+    body.omega.clone().multiply(body.inertia).length(), momentum, 1e-3);
+}
+{
   const a = new Body(HULLS.sabre);
   const b = new Body(HULLS.sabre);
   b.pos.set(a.radius + b.radius - 1, 0, 0);

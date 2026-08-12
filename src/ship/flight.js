@@ -166,6 +166,13 @@ export class Body {
     this.vel.addScaledVector(this.force, this.invMass * dt);
     this.pos.addScaledVector(this.vel, dt);
 
+    _v2.set(
+      this.omega.x * this.inertia.x,
+      this.omega.y * this.inertia.y,
+      this.omega.z * this.inertia.z,
+    );
+    const momentumSq = this.torque.lengthSq() === 0 ? _v2.lengthSq() : 0;
+
     // Euler's rotation equation: I·ω' = τ - ω × (I·ω).
     _v.set(
       this.omega.x * this.inertia.x,
@@ -176,6 +183,17 @@ export class Body {
     this.omega.x += _v.x * this.invInertia.x * dt;
     this.omega.y += _v.y * this.invInertia.y * dt;
     this.omega.z += _v.z * this.invInertia.z * dt;
+    if (momentumSq > 0) {
+      _v2.set(
+        this.omega.x * this.inertia.x,
+        this.omega.y * this.inertia.y,
+        this.omega.z * this.inertia.z,
+      );
+      const afterSq = _v2.lengthSq();
+      if (afterSq > 0) {
+        this.omega.multiplyScalar(Math.sqrt(momentumSq / afterSq));
+      }
+    }
 
     // Quaternion derivative from the world-frame angular velocity.
     _v.copy(this.omega).applyQuaternion(this.quat);
