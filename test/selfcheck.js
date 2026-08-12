@@ -39,8 +39,12 @@ const failures = [];
 
 // Keep probabilistic checks reproducible. Set SELFCHECK_SEED to replay a
 // different run; the effective seed is printed with the result.
-const SELF_CHECK_SEED = Number.parseInt(process.env.SELFCHECK_SEED || '1729', 10) >>> 0;
-let randomState = SELF_CHECK_SEED || 1;
+const requestedSeed = process.env.SELFCHECK_SEED || '1729';
+if (!/^-?\d+$/.test(requestedSeed)) {
+  throw new Error(`SELFCHECK_SEED must be an integer, got ${JSON.stringify(requestedSeed)}`);
+}
+const SELF_CHECK_SEED = Number(requestedSeed) >>> 0 || 1;
+let randomState = SELF_CHECK_SEED;
 Math.random = () => {
   randomState = (randomState * 1664525 + 1013904223) >>> 0;
   return randomState / 0x100000000;
