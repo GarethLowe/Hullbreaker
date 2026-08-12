@@ -1963,12 +1963,13 @@ ok('bow-gun hulls hold a zero fight aspect',
   }
   sys.punchHole('batteryLF', 6);
   sys.punchHole('bowarray', 4);
-  sys.damageSection('batteryLF', 6e7, null, null);
+  sys.damageSection('batteryLF', 1e8, null, null);
 
   const spares0 = sys.totalSpares();
   ok('the mauling actually took', [...sys.modules.values()].filter((m) => m.destroyed).length >= 8);
   ok('...and opened the hull', [...sys.sections.values()].filter((s) => s.breached).length >= 2);
   const buckled = [...sys.sections.values()].filter((s) => s.frameBroken).length;
+  ok('the mauling buckles a frame', buckled > 0, `${buckled} broken frames`);
 
   run(sys, 60, crew);
 
@@ -1980,7 +1981,7 @@ ok('bow-gun hulls hold a zero fight aspect',
     [...sys.sections.values()].filter((s) => s.breached).length === 0,
     [...sys.sections.values()].filter((s) => s.breached).map((s) => s.id).join(', '));
   ok('and a buckled frame is shored back up',
-    buckled === 0 || [...sys.sections.values()].filter((s) => s.frameBroken).length === 0);
+    [...sys.sections.values()].filter((s) => s.frameBroken).length === 0);
   ok('recovery costs real stock', sys.totalSpares() < spares0 && sys.totalSpares() > 0,
     `${spares0} -> ${sys.totalSpares()}`);
   ok('a recovered ship reads as sound again', sys.integrity > 0.95,
