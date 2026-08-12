@@ -352,6 +352,7 @@ export class Systems {
         breachT: 0,
         detonated: false,
         heatAcc: 0,
+        duty: 0,
         // repair bookkeeping
         repairing: false,
       };
@@ -912,13 +913,6 @@ export class Systems {
     }
     const applied = Math.min(joules, m.maxHp - m.hp);
     m.hp += applied;
-    if (m.kind === 'conduit' && m.def.net === 'coolant'
-      && m.hp > m.maxHp * COOLANT_TIGHT_FRAC) {
-      const loop = this.loops.get(m.def.to);
-      if (loop) {
-        loop.leak = 0;
-      }
-    }
     if (m.kind === 'fuel' && m.hp > m.maxHp * 0.6) {
       m.leakRate = 0;
     }
@@ -1180,7 +1174,8 @@ export class Systems {
     // at voltage. The visible symptom was the sensor array losing reach
     // whenever the engines were used, which is not a thing that should happen
     // to a ship with a charged capacitor bank.
-    const deficit = demand - supply;
+    let liveDemand = demand;
+    let deficit = liveDemand - supply;
     let covered = true;
     if (deficit > 0) {
       const drawn = Math.min(this.capStore, deficit * dt);
@@ -1190,14 +1185,18 @@ export class Systems {
         consumers.sort((a, b) => a.def.priority - b.def.priority);
         let shedTotal = 0;
         for (const m of consumers) {
-          if (demand - shedTotal <= supply) {
+          if (liveDemand - shedTotal <= supply) {
             break;
           }
           m.shed = true;
           shedTotal += m.drawNow;
         }
+        liveDemand -= shedTotal;
+        deficit = liveDemand - supply;
+        covered = deficit <= 1e-9;
       }
-    } else {
+    }
+    if (deficit <= 0) {
       const room = this.capMax - this.capStore;
       // Recharge is limited by the banks' own rate, not just by spare output.
       let rate = 0;
@@ -1231,7 +1230,7 @@ export class Systems {
     // the two big hulls down to half output with every projector shed. What a
     // plant is physically producing is `min(demand, supply)`; what it was built
     // for does not change when it gets hot.
-    const output = Math.min(demand, supply);
+    const output = Math.min(liveDemand, supply);
     const loadFactor = rated > 1e-6 ? clamp01(output / rated) : 0;
     for (const m of this.modules.values()) {
       if (m.kind === 'reactor') {
@@ -1239,7 +1238,7 @@ export class Systems {
       }
     }
 
-    const headroom = covered || demand <= 1e-6 ? 1 : clamp01(supply / demand);
+    const headroom = covered || liveDemand <= 1e-6 ? 1 : clamp01(supply / liveDemand);
     const target = (this.brownout > 0 ? 0.35 : 1) * lerp(0.55, 1, headroom);
     this.busQuality = lerp(this.busQuality, target, 1 - Math.exp(-5 * dt));
   }
@@ -1398,6 +1397,17 @@ export class Systems {
   }
 
   _tickThermal(dt) {
+    for (const loop of this.loops.values()) {
+      loop.leak = 0;
+    }
+    for (const m of this.conduits) {
+      if (m.def.net === 'coolant' && m.hp < m.maxHp * COOLANT_TIGHT_FRAC) {
+        const loop = this.loops.get(m.def.to);
+        if (loop) {
+          loop.leak = Math.max(loop.leak, m.def.leak);
+        }
+      }
+    }
     // Fuel leaks pool as spill (and drain the tank), which is what a fire eats.
     for (const m of this.modules.values()) {
       if (m.kind !== 'fuel' || m.destroyed || m.store <= 0) {
@@ -1498,7 +1508,7 @@ export class Systems {
       // circulates at whatever that tie is rated for.
       const flow = loop ? (this.online.coolant.get(node) || 0) : 0;
       // Heat in: duty-proportional, so a drive at 20 % throttle runs cool.
-      const heatIn = m.def.heat * (m.duty !== undefined ? m.duty : m.eff) + m.heatAcc;
+      const heatIn = m.def.heat * m.duty + m.heatAcc;
       m.heatAcc = 0;
       // Heat exchangers are sized to the load they were built for, so at design
       // duty every module settles at roughly the same temperature above its

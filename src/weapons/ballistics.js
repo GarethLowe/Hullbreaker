@@ -568,7 +568,7 @@ export class Ballistics {
     let best = null;
     let bestT = maxDist;
     for (const m of this.missiles) {
-      if (m.owner === owner || m.armT > 0) {
+      if (m.owner === owner || (owner?.faction && m.owner?.faction === owner.faction) || m.armT > 0) {
         continue;
       }
       _t.copy(m.pos).sub(origin);

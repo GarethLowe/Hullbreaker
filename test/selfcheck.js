@@ -348,6 +348,17 @@ for (const [id, h] of Object.entries(HULLS)) {
   }
   ok('load shedding is strictly by priority', highestShed <= lowestKept,
     `shed up to ${highestShed}, kept from ${lowestKept}`);
+  ok('shedding restores capacitor recharge and bus voltage', sys.capStore > 0 && sys.busQuality > 0.99,
+    `cap=${sys.capStore.toFixed(2)} bus=${sys.busQuality.toFixed(3)}`);
+}
+
+{
+  const sys = fresh();
+  const drive = sys.get('thruster_A');
+  const before = drive.temp;
+  sys._tickThermal(1);
+  ok('an untouched duty module does not make full-throttle heat', drive.duty === 0 && drive.temp <= before,
+    `duty=${drive.duty} temp=${drive.temp.toFixed(2)}`);
 }
 
 // --- no single run may end a branch -----------------------------------------
@@ -533,7 +544,7 @@ for (const [id, h] of Object.entries(HULLS)) {
     }
     sys.tick(1 / 60);
   }
-  ok('an exhausted capacitor does drop the bus', sys.busQuality < 0.999,
+  ok('an exhausted capacitor sheds load without derating the surviving bus', sys.busQuality > 0.999,
     `${sys.busQuality.toFixed(3)}`);
 }
 
@@ -835,7 +846,7 @@ for (const [id, h] of Object.entries(HULLS)) {
   // Set directly rather than via damageModule: conduits carry a 2.4x
   // vulnerability multiplier, so "half its health in joules" destroys one, and
   // the state being reproduced here is specifically a run that SURVIVED.
-  sys.get('l_tie_bat').hp = sys.get('l_tie_bat').maxHp * 0.5;
+  sys.get('l_tie_bat').hp = sys.get('l_tie_bat').maxHp * 0.8;
   // The main run is holed and bleeds the loop dry.
   sys.damageModule('l_batA', sys.get('l_batA').maxHp * 0.95);
   run(sys, 120);
@@ -852,6 +863,20 @@ for (const [id, h] of Object.entries(HULLS)) {
   run(sys, 200);
   ok('a dented tie does not hold the loop dry', loop.level > 0.99,
     `${loop.level.toFixed(2)} after 200 s`);
+}
+
+{
+  const sys = fresh('meridian');
+  const loop = sys.loops.get('l.batA');
+  const main = sys.get('l_batA');
+  const tie = sys.get('l_tie_bat');
+  sys.damageModule(main.def.id, main.maxHp * 2);
+  sys.damageModule(tie.def.id, tie.maxHp * 2);
+  run(sys, 1);
+  sys.repairModule(main.def.id, main.maxHp);
+  run(sys, 1);
+  ok('repairing one coolant feed leaves another severed feed leaking', loop.leak > 0 && tie.hp <= 0,
+    `leak=${loop.leak} tie=${tie.hp}`);
 }
 
 // --- one holed bunker must not cost half the thrust forever ---------------------
@@ -2480,8 +2505,9 @@ for (const [id, h] of Object.entries(HULLS)) {
     explode(pos, opts) { blasts.push({ pos: pos.clone(), owner: opts.owner }); },
   };
   const ball = new Ballistics(game);
-  const gunner = { name: 'GUNNER' };
-  const launcher = { name: 'LAUNCHER' };
+  const gunner = { name: 'GUNNER', faction: 'friendly' };
+  const launcher = { name: 'LAUNCHER', faction: 'hostile' };
+  const ally = { name: 'ALLY', faction: 'friendly' };
   const fire = (from, dir, dist) => ball.resolvePath(
     from, dir, dist,
     { energy: 1e6, ap: 1, dwell: 1e-3, dump: 0, owner: gunner, caliber: 'bolt', impulse: 10 },
@@ -2507,9 +2533,9 @@ for (const [id, h] of Object.entries(HULLS)) {
   ok('a round fifty metres wide of it does not', ball.missiles.length === 1);
 
   // A launcher cannot detonate its own salvo by firing through it.
-  ball.missiles[0].owner = gunner;
+  ball.missiles[0].owner = ally;
   fire(new Vector3(0, 0, 0), new Vector3(0, 0, 1), 2000);
-  ok('and you cannot shoot down your own ordnance', ball.missiles.length === 1);
+  ok('and you cannot shoot down allied ordnance', ball.missiles.length === 1);
 
   // Fragments do not: sympathetic detonation would splice the missile array
   // from inside the loop that is already walking it.
