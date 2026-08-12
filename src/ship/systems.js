@@ -1163,7 +1163,6 @@ export class Systems {
       consumers.push(m);
       demand += m.drawNow;
     }
-    this.demand = demand;
 
     // Shed lowest priority first until the budget closes. The capacitor covers
     // a transient overdraw; a sustained one starts switching things off.
@@ -1210,6 +1209,7 @@ export class Systems {
       }
       this.capStore += Math.min(room, Math.min(-deficit, rate) * dt);
     }
+    this.demand = liveDemand;
     this.capMax = 0;
     for (const m of this.modules.values()) {
       if (m.kind === 'capacitor' && !m.destroyed) {

@@ -459,6 +459,8 @@ ok('bow-gun hulls hold a zero fight aspect',
   run(sys, 3);
   ok('brownout sheds the shield projector', sys.get('shieldgen').shed);
   ok('brownout does NOT shed the computer', !sys.get('computer').shed);
+  ok('shed loads no longer inflate displayed demand', sys.demand <= sys.supply + 1e-6,
+    `${sys.demand.toFixed(1)} MW vs ${sys.supply.toFixed(1)} MW`);
   // The invariant that actually matters is ordering: nothing may be shed while
   // something less important is still drawing. Which specific items survive is
   // a function of how deep the hole is, not something to pin down.
