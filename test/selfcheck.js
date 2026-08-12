@@ -16,7 +16,7 @@ import { Ballistics } from '../src/weapons/ballistics.js';
 import { Ship, MOUNT_DEPRESSION } from '../src/ship/ship.js';
 import { Pilot } from '../src/ship/ai.js';
 import { Scheduler } from '../src/core/ecs.js';
-import { canFireMount } from '../src/ship/gunnery.js';
+import { canFireMount, shotHeatRate } from '../src/ship/gunnery.js';
 import { createLiveSection, sectionHeatDelta } from '../src/ship/hull-types.js';
 import { seededRandom } from '../src/core/rng.js';
 import { Euler, Quaternion, Vector3, Color } from 'three';
@@ -86,6 +86,9 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
       !canFireMount({ ...ready, [key]: missing }));
   }
 }
+
+near('a discrete shot deposits the same heat at any simulation step',
+  shotHeatRate(320, 1.5, 1 / 60) * (1 / 60), shotHeatRate(320, 1.5, 1 / 30) * (1 / 30), 1e-9);
 
 {
   const def = { id: 'test', label: 'TEST', volume: 100, plateHp: 1, frameHp: 1 };

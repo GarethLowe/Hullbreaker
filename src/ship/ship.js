@@ -21,7 +21,7 @@ import { MATERIALS, FACETS } from './hulls.js';
 import { Systems } from './systems.js';
 import { Crew } from './crew.js';
 import { Body, Autopilot, FORWARD } from './flight.js';
-import { canFireMount } from './gunnery.js';
+import { canFireMount, shotHeatRate } from './gunnery.js';
 import { Decals } from '../fx/decals.js';
 import {
   buildMount, mountFrame, mountStyle, partGeometry, shellGeometry, skinFraction,
@@ -663,7 +663,7 @@ export class Ship {
     }
     this.sys.capStore = Math.max(0, this.sys.capStore - w.draw);
     mount.cool = w.interval / clamp(mod.eff, 0.25, 1);
-    mod.heatAcc += w.heat * mount.scale;
+    mod.heatAcc += shotHeatRate(w.heat, mount.scale, dt);
     mod.duty = 1;
     mount.firing = true;
     this._launch(mount, null);
@@ -1482,7 +1482,7 @@ export class Ship {
         this.sys.capStore = Math.max(0, this.sys.capStore - w.draw);
         // A derated mount cycles slower — the loader is on the same bus.
         mount.cool = w.interval / clamp(mod.eff, 0.25, 1);
-        mod.heatAcc += w.heat * mount.scale;
+        mod.heatAcc += shotHeatRate(w.heat, mount.scale, dt);
         mod.duty = 1;
         mount.firing = true;
         this._launch(mount, target);

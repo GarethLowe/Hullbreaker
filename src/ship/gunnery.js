@@ -3,3 +3,7 @@
 export function canFireMount({ held, live, bears, cooling, charged }) {
   return held && live && bears && !cooling && charged;
 }
+
+export function shotHeatRate(heat, scale, dt) {
+  return heat * scale / dt;
+}
