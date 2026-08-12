@@ -1502,6 +1502,7 @@ export class Systems {
     }
     this.rejectCapacity = reject;
     this.rejectFraction = ratedReject > 1e-9 ? reject / ratedReject : 0;
+    const rejectPerLoop = reject / Math.max(this.loops.size, 1);
 
     for (const m of this.modules.values()) {
       const heatAcc = m.heatAcc;
@@ -1537,7 +1538,7 @@ export class Systems {
 
     for (const loop of this.loops.values()) {
       const up = this.online.coolant.get(loop.id) || 0;
-      const out = (loop.temp - AMBIENT_C) * (0.35 + reject * 1.5) * loop.level
+      const out = (loop.temp - AMBIENT_C) * (0.35 + rejectPerLoop * 1.5) * loop.level
         * (0.15 + 0.85 * up);
       loop.temp = clamp(loop.temp + ((loop.heatIn - out) / loop.capacity) * dt * 1.4, AMBIENT_C, 900);
       if (loop.level <= 0.001) {

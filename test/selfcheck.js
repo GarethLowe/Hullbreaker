@@ -1577,6 +1577,30 @@ ok('bow-gun hulls hold a zero fight aspect',
       `${sys.rejectFraction.toFixed(3)}`);
   }
 }
+{
+  const sys = fresh();
+  const ambient = sys.loops.get('l.core').temp;
+  for (const loop of sys.loops.values()) {
+    loop.temp = 100;
+    loop.heatIn = 0;
+  }
+  for (const m of sys.modules.values()) {
+    m.temp = 100;
+    m.duty = 0;
+    m.heatAcc = 0;
+  }
+  sys._tickNetworks();
+  const loop = sys.loops.get('l.core');
+  const up = sys.online.coolant.get(loop.id) || 0;
+  const reject = [...sys.modules.values()].filter((m) => m.kind === 'radiator')
+    .reduce((total, m) => total + m.def.reject, 0);
+  const oldOut = (100 - ambient) * (0.35 + reject * 1.5)
+    * (0.15 + 0.85 * up);
+  const oldTemp = 100 - (oldOut / loop.capacity) * 1.4;
+  sys._tickThermal(1);
+  ok('ship-wide radiator capacity is not applied to every coolant loop', loop.temp > oldTemp + 1e-6,
+    `${loop.temp.toFixed(3)} vs old ${oldTemp.toFixed(3)}`);
+}
 
 // --- holding a shield is cheap; working one is not --------------------------
 // Maintaining status should be a hotel service. The strain is meant to arrive
