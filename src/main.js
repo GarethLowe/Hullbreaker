@@ -726,7 +726,6 @@ export class Game {
     // it died, it keeps doing forever.
     ship.autopilot.cmd.throttle = 0;
     ship.autopilot.cmd.assist = false;
-    ship.body.omega.multiplyScalar(1);
     randomDirection(_v, this.random);
     ship.body.omega.addScaledVector(_v, rand(0.15, 0.6, this.random));
     if (ship.faction === 'hostile') {
