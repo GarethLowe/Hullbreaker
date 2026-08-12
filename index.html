@@ -332,6 +332,7 @@
      moving inboard when the target's damage-control panel is open, which the
      other right-hand instruments already do. */
   #hudPip { position: absolute; right: 18px; top: 152px; width: 260px; }
+  #hudPip.hidden { display: none; }
   #ui:has(#tdiagPanel:not(.hidden)) #hudPip { right: calc(var(--diag-w) + 34px); }
   /* Transparent: the picture is painted on the canvas BELOW this element, so
      any background here would sit on top of it and wash it out. */
