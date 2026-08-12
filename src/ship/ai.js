@@ -66,7 +66,6 @@ export class Pilot {
   constructor(ship, game) {
     this.ship = ship;
     this.game = game;
-    this.random = game.random || Math.random;
     this.state = AI_STATE.PATROL;
     this.target = null;
     this.stateT = 0;
@@ -75,9 +74,9 @@ export class Pilot {
     this.lastSeenAge = 1e9;
     this.breakDir = new THREE.Vector3(1, 0, 0);
     // Per-ship personality so a wing does not fly in perfect unison.
-    this.aggression = rand(0.7, 1.25, this.random);
-    this.preferred = rand(ENGAGEMENT_RANGE * 0.62, ENGAGEMENT_RANGE * 1.15, this.random);
-    this.reflex = rand(0.8, 1.3, this.random);
+    this.aggression = rand(0.7, 1.25, game.random || Math.random);
+    this.preferred = rand(ENGAGEMENT_RANGE * 0.62, ENGAGEMENT_RANGE * 1.15, game.random || Math.random);
+    this.reflex = rand(0.8, 1.3, game.random || Math.random);
     this.wander = new THREE.Vector3();
     this.wanderT = 0;
     this.withdrawT = 0;
@@ -189,7 +188,7 @@ export class Pilot {
    * Two ships on opposite beams therefore still work on opposite flanks.
    */
   _pickAim(target) {
-    const random = this.random || Math.random;
+    const random = this.game?.random || Math.random;
     _aimScan.copy(this.ship.position).sub(target.position);
     if (_aimScan.lengthSq() < 1e-6) {
       return null;
@@ -329,8 +328,8 @@ export class Pilot {
     if (s === AI_STATE.BREAK) {
       // Pick a break direction once, so the manoeuvre is committed rather than
       // re-rolled every frame into a twitch.
-      this.breakDir.set(rand(-1, 1, this.random), rand(-1, 1, this.random),
-        rand(-1, 1, this.random)).normalize();
+      this.breakDir.set(rand(-1, 1, this.game.random || Math.random), rand(-1, 1, this.game.random || Math.random),
+        rand(-1, 1, this.game.random || Math.random)).normalize();
     }
   }
 
@@ -478,9 +477,9 @@ export class Pilot {
   _patrol(dt, cmd) {
     this.wanderT -= dt;
     if (this.wanderT <= 0) {
-      this.wanderT = rand(3, 7, this.random);
-      this.wander.set(rand(-1, 1, this.random), rand(-0.5, 0.5, this.random),
-        rand(-1, 1, this.random)).normalize();
+      this.wanderT = rand(3, 7, this.game.random || Math.random);
+      this.wander.set(rand(-1, 1, this.game.random || Math.random), rand(-0.5, 0.5, this.game.random || Math.random),
+        rand(-1, 1, this.game.random || Math.random)).normalize();
     }
     this._steer(cmd, this.wander, dt, false);
     cmd.throttle = damp(cmd.throttle, 0.3, 2, dt);

@@ -8,3 +8,8 @@ export function seededRandom(seed = (Date.now() >>> 0)) {
   random.seed = state;
   return random;
 }
+
+export function seedFromSearch(search) {
+  const seed = Number.parseInt(new URLSearchParams(search).get('seed'), 10);
+  return Number.isInteger(seed) ? seed : undefined;
+}

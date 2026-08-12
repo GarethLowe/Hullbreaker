@@ -19,7 +19,7 @@ import { Game } from '../src/main.js';
 import { Scheduler } from '../src/core/ecs.js';
 import { canFireMount, shotHeatRate } from '../src/ship/gunnery.js';
 import { createLiveSection, sectionHeatDelta } from '../src/ship/hull-types.js';
-import { seededRandom } from '../src/core/rng.js';
+import { seededRandom, seedFromSearch } from '../src/core/rng.js';
 import { Euler, Quaternion, Vector3, Color } from 'three';
 import { PARTS, MUZZLES, PIVOTS } from '../src/world/kit.js';
 import {
@@ -132,6 +132,8 @@ near('a discrete shot deposits the same heat at any simulation step',
   const b = seededRandom(1729);
   ok('a simulation RNG replays its seed', [a(), a(), a()].join(',') === [b(), b(), b()].join(','));
 }
+
+ok('a URL seed is accepted for simulation replay', seedFromSearch('?seed=1729') === 1729);
 
 // --- hull tables ------------------------------------------------------------
 for (const [id, h] of Object.entries(HULLS)) {

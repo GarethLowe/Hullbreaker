@@ -308,7 +308,6 @@ export class Systems {
   constructor(hull, ship = null) {
     this.hull = hull;
     this.ship = ship;
-    this.random = ship && ship.game.random ? ship.game.random : Math.random;
     this.events = [];
 
     // -- modules -------------------------------------------------------------
@@ -531,7 +530,7 @@ export class Systems {
     // the box first — the risk scales with how much is still in it.
     if (m.kind === 'magazine' && m.hp > 0 && m.rounds > 0) {
       const risk = clamp01(joules / 4e5) * clamp01(m.rounds / Math.max(m.def.rounds, 1)) * 0.30;
-      if (this.random() < risk) {
+      if ((this.ship?.game.random || Math.random)() < risk) {
         this._cookOff(m, hitPoint);
       }
     }
@@ -600,7 +599,7 @@ export class Systems {
       // point fire is not an event, it is the ship's paint. A quarter is the
       // ceiling: a compartment under sustained fire catches soon enough, and
       // taking a couple of rounds usually costs you nothing but plate.
-      if (this.random() < Math.min(0.25, rupture * 0.45)) {
+      if ((this.ship?.game.random || Math.random)() < Math.min(0.25, rupture * 0.45)) {
         this.ignite(sectionId, 5 + 14 * s.spill);
       }
     }
@@ -832,7 +831,7 @@ export class Systems {
       case 'magazine':
         // A destroyed magazine nearly always goes up: the box is what was
         // keeping the propellant apart.
-        if (m.rounds > 0 && this.random() < 0.75) {
+        if (m.rounds > 0 && (this.ship?.game.random || Math.random)() < 0.75) {
           this._cookOff(m, at);
         } else {
           this.events.push({ type: 'moduleKill', at, dir, module: m });
@@ -1342,9 +1341,9 @@ export class Systems {
         // casualty, which is why a fire reliably costs you a network.
         if (m.def.mat === 'soft') {
           this.damageModule(m.id, m.maxHp * FIRE_BURN_FRAC * intensity * dt, null, null);
-        } else if (m.kind === 'magazine' && this.random() < 0.18 * intensity * dt) {
+        } else if (m.kind === 'magazine' && (this.ship?.game.random || Math.random)() < 0.18 * intensity * dt) {
           this._cookOff(m, null);
-        } else if (m.kind === 'fuel' && this.random() < 0.10 * intensity * dt) {
+        } else if (m.kind === 'fuel' && (this.ship?.game.random || Math.random)() < 0.10 * intensity * dt) {
           this.damageModule(m.id, m.maxHp * 0.4, null, null);
         }
       }
@@ -1362,7 +1361,7 @@ export class Systems {
           if (!n || n.fire > 0 || n.atmo < 0.4 || n.spill < 0.12) {
             continue;
           }
-          if (this.random() < 0.4) {
+          if ((this.ship?.game.random || Math.random)() < 0.4) {
             this.ignite(nId, s.fire * 0.6);
           }
         }
@@ -1808,7 +1807,7 @@ export class Systems {
       return;
     }
     for (const c of this.conduits) {
-      if (!c.destroyed || c.def.net !== 'power' || this.random() > ARC_CHANCE * dt) {
+      if (!c.destroyed || c.def.net !== 'power' || (this.ship?.game.random || Math.random)() > ARC_CHANCE * dt) {
         continue;
       }
       const victims = [];
@@ -1838,11 +1837,11 @@ export class Systems {
         victims.push(m);
       }
       if (victims.length > 0) {
-        const v = victims[Math.floor(this.random() * victims.length)];
+        const v = victims[Math.floor((this.ship?.game.random || Math.random)() * victims.length)];
         this.damageModule(v.id, v.maxHp * ARC_DAMAGE_FRAC, null, null);
       }
       // An arc next to spilled fuel is one of the two ways a fire starts.
-      if (this.random() < 0.35) {
+      if ((this.ship?.game.random || Math.random)() < 0.35) {
         this.ignite(c.section, 7);
       }
     }
@@ -1858,7 +1857,7 @@ export class Systems {
       if (s) {
         s.temp = Math.min(900, s.temp + 220 * dt);
         s.spill = clamp01(s.spill + 0.3 * dt);
-        if (this.random() < 1.4 * dt) {
+        if ((this.ship?.game.random || Math.random)() < 1.4 * dt) {
           this.ignite(m.section, 10);
         }
       }
@@ -1867,7 +1866,7 @@ export class Systems {
       // you want to be sure.
       if (m.breachT > 2.4) {
         m.breached = false;
-        if (this.random() < BREACH_DETONATE_CHANCE) {
+        if ((this.ship?.game.random || Math.random)() < BREACH_DETONATE_CHANCE) {
           m.detonated = true;
           this.events.push({ type: 'detonate', module: m, at: null });
         } else {

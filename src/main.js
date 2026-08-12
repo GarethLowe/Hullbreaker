@@ -35,7 +35,7 @@ import { HUD } from './ui/hud.js';
 import { Targeting } from './ui/targeting.js';
 import { Diagnostics } from './ui/diagnostics.js';
 import { clamp01, rand, randInt, pick, randomDirection } from './core/mathx.js';
-import { seededRandom } from './core/rng.js';
+import { seededRandom, seedFromSearch } from './core/rng.js';
 
 /**
  * Real-time cadence of the simulation. The world is stepped this often per
@@ -84,7 +84,7 @@ export class Game {
       68, window.innerWidth / window.innerHeight, CAMERA_NEAR, CAMERA_FAR,
     );
     this.scheduler = new Scheduler();
-    this.random = seededRandom();
+    this.random = seededRandom(seedFromSearch(window.location.search));
     this.audio = new AudioEngine();
     this.input = new Input(this.canvas);
     this.hulls = HULLS;

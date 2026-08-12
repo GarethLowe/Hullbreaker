@@ -169,7 +169,7 @@ export class Trace {
         mods: 'id: state/hp%/tempC/leak — state X=destroyed T=tripped S=shed',
         loops: 'id: level%/tempC/leak/flow',
         nets: 'nodes currently served',
-        note: 'modules appear only while NOT nominal; absence means healthy',
+        note: 'modules appear only while NOT nominal; absence means healthy. Seed replays simulation randomness only when reused at boot with ?seed=; inputs and step timing are not recorded.',
       },
       hull: this.game.player ? this.game.player.ship.hull.id : null,
       seed: this.game.random ? this.game.random.seed : null,
