@@ -103,6 +103,27 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
 }
 
 {
+  const sys = fresh('meridian');
+  const ship = Object.assign(Object.create(Ship.prototype), {
+    disposed: false,
+    body: { pos: new Vector3(), quat: new Quaternion() },
+    hitRadius: HULLS.meridian.radius,
+    shieldR: 0,
+    shieldRadii: HULLS.meridian.shield.radii,
+    hull: HULLS.meridian,
+    sys,
+    _secR: new Map(HULLS.meridian.sections.map((s) => [s.id, Math.hypot(...s.half)])),
+  });
+  sys.shield.up = false;
+  const hits = [];
+  ship.gatherRayHits(new Vector3(0, 0, -1000), new Vector3(0, 0, 1), 2000, hits);
+  hits.sort((a, b) => a.t - b.t);
+  const first = hits.find((h) => h.kind === 'wallIn');
+  ok('a real hull ray resolves its first hit as the MERIDIAN drive bay',
+    first?.section === 'drivebay' && first.t > 800, `${first?.section} at ${first?.t}`);
+}
+
+{
   const ready = { held: true, live: true, bears: true, cooling: false, charged: true };
   ok('a gunnery gate accepts a ready mount', canFireMount(ready));
   for (const key of Object.keys(ready)) {
