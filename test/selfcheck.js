@@ -15,6 +15,7 @@ import { WEAPONS, AMMO, MOUNTS } from '../src/weapons/defs.js';
 import { Ballistics, beamDamageBudget } from '../src/weapons/ballistics.js';
 import { Ship, MOUNT_DEPRESSION } from '../src/ship/ship.js';
 import { Pilot } from '../src/ship/ai.js';
+import { Game } from '../src/main.js';
 import { Scheduler } from '../src/core/ecs.js';
 import { canFireMount, shotHeatRate } from '../src/ship/gunnery.js';
 import { createLiveSection, sectionHeatDelta } from '../src/ship/hull-types.js';
@@ -75,6 +76,12 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
   scheduler.addSystem('early', () => order.push('early'), 10);
   scheduler.run({});
   ok('the scheduler runs systems in declared order', order.join(',') === 'early,late');
+}
+
+{
+  const game = { over: true, input: { requestLock() {} } };
+  Game.prototype._resumePlaying.call(game);
+  ok('retry keeps the game-over state until pointer lock succeeds', game.over && game.resuming);
 }
 
 {

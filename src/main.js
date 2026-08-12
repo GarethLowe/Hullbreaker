@@ -59,7 +59,7 @@ const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 
-class Game {
+export class Game {
   constructor() {
     this.canvas = document.getElementById('view');
     this.renderer = new THREE.WebGLRenderer({
@@ -144,6 +144,12 @@ class Game {
     this.input.onLockChange = (locked) => {
       if (locked) {
         this.staticRendered = false;
+        if (this.resuming) {
+          this.resuming = false;
+          this.over = false;
+          this.waveTimer = 45;
+          document.getElementById('gameover').classList.add('hidden');
+        }
         if (!this.started) {
           this.started = true;
           document.getElementById('splash').classList.add('hidden');
@@ -315,9 +321,7 @@ class Game {
   }
 
   _resumePlaying() {
-    this.over = false;
-    this.waveTimer = 45;
-    document.getElementById('gameover').classList.add('hidden');
+    this.resuming = true;
     this.input.requestLock();
   }
 
@@ -937,6 +941,8 @@ class Game {
   }
 }
 
-const game = new Game();
-game.init();
-window.game = game;
+if (typeof window !== 'undefined') {
+  const game = new Game();
+  game.init();
+  window.game = game;
+}
