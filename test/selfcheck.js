@@ -370,6 +370,12 @@ ok('bow-gun hulls hold a zero fight aspect',
 }
 
 {
+  const game = { reducedMotion: false };
+  Game.prototype._setReducedMotion.call(game, { matches: true });
+  ok('motion preference changes update the live game setting', game.reducedMotion);
+}
+
+{
   const donorParty = { size: 10, max: 10, at: 'donor' };
   const needParty = { size: 5.9, max: 6, at: 'need' };
   const donor = { max: 10, role: 'gunner', suited: false, parties: [donorParty] };

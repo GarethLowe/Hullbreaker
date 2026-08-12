@@ -118,10 +118,12 @@ export class Game {
     /** Simulation time advances only with fixed simulation steps. */
     this.simTime = 0;
     this.staticRendered = false;
-    this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    this.reducedMotion = this.motionQuery.matches;
   }
 
   init() {
+    this.motionQuery.addEventListener('change', (event) => this._setReducedMotion(event));
     this.assets = new Assets(this.renderer);
     this.fx = new FX(this);
     this.space = new Space(this);
@@ -982,5 +984,9 @@ if (typeof window !== 'undefined') {
   } catch (error) {
     console.error(error);
     Game.showFatal();
+  }
+
+  _setReducedMotion(event) {
+    this.reducedMotion = event.matches;
   }
 }
