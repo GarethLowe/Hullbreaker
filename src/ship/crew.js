@@ -390,10 +390,6 @@ export class Crew {
     return r;
   }
 
-  _route(from, to, suited) {
-    return this._pathFrom(this._solve(from, suited), from, to);
-  }
-
   // -- task selection --------------------------------------------------------
 
   /**
@@ -402,7 +398,7 @@ export class Crew {
    * door beats a big one three burning compartments away — which is how a real
    * damage-control party triages.
    */
-  _findJob(division, solved) {
+  _findJob(solved) {
     const sys = this.sys;
     let best = null;
     let bestScore = 0;
@@ -765,7 +761,7 @@ export class Crew {
       }
       d.idleT = 0.8;
       const solved = this._solveCached(d.at, d.suited);
-      const job = this._findJob(d, solved);
+      const job = this._findJob(solved);
       const holdsStation = STATION_ROLES.has(d.role);
       const stationSafe = holdsStation && this._tenable(d.station)
         && this._worthManning(d);
