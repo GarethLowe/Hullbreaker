@@ -1349,9 +1349,6 @@ export class Ship {
     if (mod.eff <= 0.12) {
       return 'NO POWER';
     }
-    if (!this.sys.hasData(mod)) {
-      return 'NO LINK';
-    }
     const need = mount.weapon.ammo;
     if (need) {
       const mag = this.sys.get(mount.def.feed);
@@ -1361,6 +1358,9 @@ export class Ship {
     }
     if (!this._canDraw(mount.weapon.draw)) {
       return 'NO CHARGE';
+    }
+    if (!this.sys.hasData(mod)) {
+      return 'BORESIGHT';
     }
     if (mount.cool > 0) {
       return 'CYCLING';

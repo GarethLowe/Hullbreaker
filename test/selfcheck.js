@@ -87,6 +87,12 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
   }
 }
 
+{
+  const mount = { mod: { destroyed: false, tripped: false, eff: 1 }, weapon: { ammo: 1, draw: 1 }, def: { feed: 'mag' }, cool: 0 };
+  const ship = { sys: { hasData: () => false, get: () => ({ destroyed: false, rounds: 1 }) }, _canDraw: () => true };
+  ok('a linkless gun reports boresight rather than dead', Ship.prototype.mountFault.call(ship, mount) === 'BORESIGHT');
+}
+
 near('a discrete shot deposits the same heat at any simulation step',
   shotHeatRate(320, 1.5, 1 / 60) * (1 / 60), shotHeatRate(320, 1.5, 1 / 30) * (1 / 30), 1e-9);
 
