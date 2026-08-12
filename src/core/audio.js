@@ -186,7 +186,7 @@ export class AudioEngine {
    * far away something big is — and it is what stops a battery two kilometres
    * off sounding exactly like one bolted to your own deck.
    */
-  _chain(gainValue, pan, dist, send = 0.35) {
+  _chain(pan, dist, send = 0.35) {
     const g = this.ctx.createGain();
     g.gain.value = 0;
     let node = g;
@@ -222,15 +222,15 @@ export class AudioEngine {
     return true;
   }
 
-  _release(node, dur) {
-    setTimeout(() => {
+  _releaseOnEnded(source, node) {
+    source.onended = () => {
       this.voices = Math.max(0, this.voices - 1);
       try {
         node.disconnect();
       } catch (e) {
         // Already torn down by the context; nothing to do.
       }
-    }, dur * 1000 + 60);
+    };
   }
 
   // -- layers ----------------------------------------------------------------
@@ -267,7 +267,7 @@ export class AudioEngine {
       f.frequency.exponentialRampToValueAtTime(Math.max(40, freq * sweep), t + dur);
     }
     f.Q.value = q;
-    const g = this._chain(gain, pan, dist, send);
+    const g = this._chain(pan, dist, send);
     const atk = attack || Math.min(0.012, dur * 0.2);
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(gain * level, t + atk);
@@ -281,7 +281,7 @@ export class AudioEngine {
     head.connect(g);
     src.start(t);
     src.stop(t + dur + 0.02);
-    this._release(g, dur);
+    this._releaseOnEnded(src, g);
   }
 
   /** A soft-clipping curve. `k` from 0 (clean) upward. */
@@ -316,14 +316,14 @@ export class AudioEngine {
     o.type = type;
     o.frequency.setValueAtTime(f0, t);
     o.frequency.exponentialRampToValueAtTime(Math.max(30, f1), t + dur);
-    const g = this._chain(gain, pan, dist, send);
+    const g = this._chain(pan, dist, send);
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(gain * level, t + 0.006);
     g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
     o.connect(g);
     o.start(t);
     o.stop(t + dur + 0.02);
-    this._release(g, dur);
+    this._releaseOnEnded(o, g);
   }
 
   /**
@@ -345,7 +345,7 @@ export class AudioEngine {
     o.type = 'sine';
     o.frequency.setValueAtTime(f0, t);
     o.frequency.exponentialRampToValueAtTime(Math.max(16, f1), t + dur * 0.85);
-    const g = this._chain(gain, pan, dist, send);
+    const g = this._chain(pan, dist, send);
     g.gain.setValueAtTime(0, t);
     // Sub energy has to arrive instantly or it reads as a swell rather than a
     // hit; it is the decay that should be long.
@@ -354,7 +354,7 @@ export class AudioEngine {
     o.connect(g);
     o.start(t);
     o.stop(t + dur + 0.02);
-    this._release(g, dur);
+    this._releaseOnEnded(o, g);
   }
 
   /**

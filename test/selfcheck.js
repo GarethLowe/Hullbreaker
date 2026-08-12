@@ -19,6 +19,7 @@ import { Game } from '../src/main.js';
 import { Diagnostics } from '../src/ui/diagnostics.js';
 import { FX } from '../src/fx/fx.js';
 import { Scheduler } from '../src/core/ecs.js';
+import { AudioEngine } from '../src/core/audio.js';
 import { canFireMount, shotHeatRate } from '../src/ship/gunnery.js';
 import { createLiveSection, sectionHeatDelta } from '../src/ship/hull-types.js';
 import { seededRandom, seedFromSearch } from '../src/core/rng.js';
@@ -380,6 +381,16 @@ ok('bow-gun hulls hold a zero fight aspect',
   Game.prototype._onOverKey.call({ over: true, _retryFromGameOver() { retries++; } },
     { code: 'KeyR', ctrlKey: true, altKey: false, metaKey: false, shiftKey: false });
   ok('game-over hotkeys leave modified browser shortcuts alone', retries === 0);
+}
+
+{
+  const audio = new AudioEngine();
+  audio.voices = 1;
+  const source = {};
+  let disconnected = 0;
+  audio._releaseOnEnded(source, { disconnect() { disconnected++; } });
+  source.onended();
+  ok('an ended audio source frees its voice slot immediately', audio.voices === 0 && disconnected === 1);
 }
 
 {
