@@ -256,7 +256,7 @@ function fightAspect(spec) {
   const w2 = (m) => WEAPONS[m.weapon];
   const STEP = (1 * Math.PI) / 180;
   const samples = [];
-  for (let th = 0; th <= Math.PI + 1e-9; th += STEP) {
+  for (let th = -Math.PI; th <= Math.PI + 1e-9; th += STEP) {
     samples.push({ th, v: borneAt(th) });
   }
   const best = samples.reduce((a, x) => Math.max(a, x.v), 0);

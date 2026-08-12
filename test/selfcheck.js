@@ -144,6 +144,15 @@ for (const [id, h] of Object.entries(HULLS)) {
     `hull ${(h.flight.yawRate * 57.3).toFixed(1)} deg/s vs sweep `
     + `${(sweep * 57.3).toFixed(1)} deg/s, turrets=${turrets}`);
 }
+ok('bow-gun hulls hold a zero fight aspect',
+  Math.abs(HULLS.sabre.fightAspect) < 0.02 && Math.abs(HULLS.halberd.fightAspect) < 0.02
+  && Math.abs(HULLS.bastion.fightAspect) < 0.02);
+{
+  const fixed = {};
+  const pilot = new Pilot({ fireGroups: [[fixed], []], onTarget: (m) => m === fixed }, { random: () => 0.5 });
+  pilot.target = {};
+  ok('fixed-gun fire gating follows a bearing mount, not hull attitude', pilot._fixedGunsBear());
+}
 
 // --- physics and thermal invariants ----------------------------------------
 {

@@ -465,14 +465,14 @@ export class Pilot {
    * at five kilometres, which is how an AI ends up emptying its magazines
    * into empty space while appearing to aim perfectly well.
    */
-  _aimCos(target, dist) {
-    const half = Math.atan2(target.hitRadius * 0.75, Math.max(dist, 1));
-    return Math.cos(half + 0.0035);
-  }
-
   _turretsBear(tolerance = 0.05) {
     const t = this.target;
     return !!t && this.ship.fireGroups[1].some((m) => this.ship.onTarget(m, t, tolerance));
+  }
+
+  _fixedGunsBear(tolerance = 0.05) {
+    const t = this.target;
+    return !!t && this.ship.fireGroups[0].some((m) => this.ship.onTarget(m, t, tolerance));
   }
 
   _patrol(dt, cmd) {
@@ -527,7 +527,7 @@ export class Pilot {
     this._aimPoint(_lead);
     const dist = _lead.length();
     _lead.normalize();
-    const cos = this._steer(cmd, _lead, dt, true, true);
+    this._steer(cmd, _lead, dt, true, true);
 
     // Range hold. `closing` is how fast the gap is shrinking; damping on it
     // keeps the controller from surging in and out.
@@ -571,7 +571,7 @@ export class Pilot {
     cmd.strafeY = Math.cos(t * 0.7 * this.reflex + this.ship.id * 1.7) * 0.45;
 
     const seen = this.lastSeenAge < 1.2;
-    this.triggers[0] = seen && dist < WEAPONS_FREE && cos > this._aimCos(target, dist);
+    this.triggers[0] = seen && dist < WEAPONS_FREE && this._fixedGunsBear();
     this.triggers[1] = seen && dist < WEAPONS_FREE && this._turretsBear();
   }
 
@@ -626,13 +626,13 @@ export class Pilot {
     this._aimPoint(_lead);
     const bear = _lead.length();
     _lead.normalize();
-    const cos = this._steer(cmd, _lead, dt, true, true);
+    this._steer(cmd, _lead, dt, true, true);
     cmd.throttle = damp(cmd.throttle, 0, 2, dt);
     cmd.boost = false;
     cmd.strafeX = 0;
     cmd.strafeY = 0;
     const seen = this.lastSeenAge < 1.5;
-    this.triggers[0] = seen && bear < WEAPONS_FREE && cos > this._aimCos(threat, bear);
+    this.triggers[0] = seen && bear < WEAPONS_FREE && this._fixedGunsBear(0.06);
     this.triggers[1] = seen && this._turretsBear(0.06);
   }
 }
