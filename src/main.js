@@ -249,6 +249,9 @@ export class Game {
   }
 
   _deployWave(w) {
+    if (!this.player || this.player.ship.disposed) {
+      return;
+    }
     const n = Math.min(4, 1 + Math.floor((w - 1) / 3));
     const pool = w <= 2 ? ['sabre']
       : (w <= 4 ? ['sabre', 'sabre', 'halberd']

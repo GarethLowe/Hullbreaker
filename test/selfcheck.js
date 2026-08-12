@@ -100,6 +100,12 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
 }
 
 {
+  let deployed = 0;
+  Game.prototype._deployWave.call({ player: null, _addShip() { deployed++; } }, 1);
+  ok('a wave is not deployed without a live player hull', deployed === 0);
+}
+
+{
   let resized = 0;
   const panel = { ship: null, root: { classList: { toggle() {} } }, visible: true, resize() { resized++; } };
   Diagnostics.prototype.setShip.call(panel, {});
