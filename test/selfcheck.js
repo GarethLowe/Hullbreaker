@@ -1447,6 +1447,14 @@ ok('bow-gun hulls hold a zero fight aspect',
   ok('cook-off wrecks the compartment from inside', spine.plateHp < plateBefore);
   ok('cook-off starts a fire', spine.fire > 0);
 }
+{
+  const sys = new Systems(HULLS.meridian, { game: { random: () => 0 } });
+  const mag = sys.get('mag_fwd');
+  sys.damageModule(mag.id, 4e5, null, null);
+  const events = sys.events.filter((e) => e.module === mag);
+  ok('a hit-triggered cook-off emits one magazine kill event',
+    events.length === 1 && events[0].type === 'cookoff', events.map((e) => e.type).join(','));
+}
 
 // --- crew -------------------------------------------------------------------
 {

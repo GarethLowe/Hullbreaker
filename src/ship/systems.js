@@ -535,7 +535,7 @@ export class Systems {
       }
     }
 
-    if (m.hp <= 0) {
+    if (m.hp <= 0 && !m.destroyed) {
       m.destroyed = true;
       m.eff = 0;
       this._onDestroyed(m, hitPoint, hitDir);
