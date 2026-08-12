@@ -2752,6 +2752,17 @@ ok('bow-gun hulls hold a zero fight aspect',
 }
 
 // --- point defence covers the ship, not just the roof ------------------------
+{
+  const ship = Object.create(Ship.prototype);
+  ship.faction = 'friendly';
+  ship.body = { quat: new Quaternion() };
+  ship.localToWorld = (local, out) => out.copy(local);
+  ship._pdTarget = { pos: null, vel: null, cone: 0 };
+  ship._pdLoad = new Map();
+  ship.game = { ballistics: { missiles: [{ armT: 0, owner: { faction: 'hostile' }, pos: new Vector3(0, -20, 20), vel: new Vector3() }] }, ships: [] };
+  const mount = { weapon: { pdRange: 100, pdShipRange: 0 }, origin: new Vector3(), rest: new Vector3(0, 0, 1), up: new Vector3(0, 1, 0), def: { arc: Math.PI } };
+  ok('point defence ignores threats below its depression stop', ship._pdThreat(mount) === null);
+}
 // A mount cannot depress below the deck it is bolted to, so a hull carrying
 // nothing but dorsal repeaters is wide open from underneath — and every hull
 // here was. A torpedo run from below arrived unopposed against all four.

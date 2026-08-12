@@ -531,6 +531,10 @@ export class Ship {
         return -1;
       }
       _v2.multiplyScalar(1 / d);
+      if (mount.up
+          && _v2.dot(_mntT.copy(mount.up).applyQuaternion(this.body.quat)) < -Math.sin(MOUNT_DEPRESSION)) {
+        return -1;
+      }
       // It has to be inside the traverse, or the gun would train to the stop
       // and fire into its own plating.
       return Math.acos(clamp(_v2.dot(_mnt), -1, 1)) > mount.def.arc ? -1 : d;
