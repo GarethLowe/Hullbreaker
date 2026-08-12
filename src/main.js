@@ -372,6 +372,7 @@ export class Game {
       }
     }
     this.ballistics.clear();
+    this.fx.clear();
     this.startWave(this.wave + 1);
     this.hud.nudge(`SKIPPED TO WAVE ${this.wave}`, 1.6);
   }

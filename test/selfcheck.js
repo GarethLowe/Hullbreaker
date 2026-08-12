@@ -106,6 +106,16 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
 }
 
 {
+  let cleared = 0;
+  const game = {
+    ships: [], ballistics: { clear() {} }, fx: { clear() { cleared++; } }, wave: 1,
+    startWave() {}, hud: { nudge() {} },
+  };
+  Game.prototype.skipWave.call(game);
+  ok('skipping a wave clears its lingering effects', cleared === 1);
+}
+
+{
   let resized = 0;
   const panel = { ship: null, root: { classList: { toggle() {} } }, visible: true, resize() { resized++; } };
   Diagnostics.prototype.setShip.call(panel, {});
