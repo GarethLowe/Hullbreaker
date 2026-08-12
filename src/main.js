@@ -888,7 +888,7 @@ export class Game {
       this.accumulator += wall;
       let steps = 0;
       const dt = Math.max(FIXED_DT * this.timeScale, MIN_SIM_DT);
-      while (this.accumulator >= STEP_INTERVAL && steps < MAX_STEPS) {
+      while (this.accumulator >= STEP_INTERVAL && steps < MAX_STEPS && !this.over) {
         this.accumulator -= STEP_INTERVAL;
         steps++;
         this.simTime += dt;
