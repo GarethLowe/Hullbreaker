@@ -2143,10 +2143,9 @@ export class Systems {
    * to 62 percent hull with full magazines and working guns, and none of the
    * four bars on the HUD predicted it. Losing the ability to manoeuvre is now
    * `isDerelict` — a different outcome, handled differently.
-   */
+  */
   isStricken() {
-    const core = this.modules.get('reactor');
-    if (core && core.detonated) {
+    if ([...this.modules.values()].some((m) => m.kind === 'reactor' && m.detonated)) {
       return true;
     }
     // The hull has come apart, or there is nobody left to fight it.

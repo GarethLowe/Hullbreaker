@@ -2043,6 +2043,9 @@ ok('bow-gun hulls hold a zero fight aspect',
   run(sys, 6);
   ok('losing the primary plant alone does NOT finish a cruiser', !sys.isStricken(),
     `the auxiliary is still making ${sys.supply.toFixed(0)} MW`);
+  sys.get('reactor_aux').detonated = true;
+  ok('an auxiliary reactor detonation also strikes the ship', sys.isStricken());
+  sys.get('reactor_aux').detonated = false;
   sys.damageModule('reactor_aux', 1e12);
   sys.get('reactor_aux').breached = false;
   run(sys, 6);
