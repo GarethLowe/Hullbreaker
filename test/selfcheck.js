@@ -328,6 +328,23 @@ ok('bow-gun hulls hold a zero fight aspect',
   ok('wiping a party clears its accumulated casualty report', party.casualtyAcc === 0);
 }
 
+{
+  const donorParty = { size: 10, max: 10, at: 'donor' };
+  const needParty = { size: 5.9, max: 6, at: 'need' };
+  const donor = { max: 10, role: 'gunner', suited: false, parties: [donorParty] };
+  const need = { max: 12, role: 'gunner', station: 'need', parties: [needParty] };
+  donorParty.div = donor;
+  needParty.div = need;
+  const crew = Object.create(Crew.prototype);
+  crew.reinforceT = 0;
+  crew.divisions = [donor, need];
+  crew.events = [];
+  crew._tenable = () => true;
+  crew._solveCached = () => ({ dist: new Map([['need', 1]]) });
+  crew._redistribute(0);
+  ok('cross-decking never overfills its receiving party', needParty.size <= needParty.max);
+}
+
 // --- physics and thermal invariants ----------------------------------------
 {
   const sys = fresh();

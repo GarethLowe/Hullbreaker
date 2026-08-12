@@ -643,15 +643,19 @@ export class Crew {
     // own station rather than the hands vanishing into an average.
     const from = donor.parties.reduce((a, q) => (q.size > a.size ? q : a), donor.parties[0]);
     const to = need.parties.reduce((a, q) => (q.size < a.size ? q : a), need.parties[0]);
-    from.size -= moved;
+    const posted = Math.min(moved, to.max - to.size);
+    if (posted <= 0.01) {
+      return;
+    }
+    from.size -= posted;
     if (to.size <= 0.01) {
       to.at = need.station;
       to.heading = null;
       to.path = [];
       to.task = null;
     }
-    to.size += moved;
-    this.events.push({ type: 'crossDeck', from: donor, to: need, hands: moved });
+    to.size += posted;
+    this.events.push({ type: 'crossDeck', from: donor, to: need, hands: posted });
   }
 
   /**
