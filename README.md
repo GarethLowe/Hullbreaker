@@ -1393,7 +1393,8 @@ subsystem rather than the hull.
 npm test
 ```
 
-871 assertions, no framework, about a second. They drive the real `Systems`,
+The current assertion count is printed by the runner; no framework, several
+seconds. They drive the real `Systems`,
 `Crew` and `Ballistics` classes with no renderer attached and cover the things
 that are expensive to notice by flying around: network redundancy on each hull,
 load-shed ordering, the shield coupling curve and both of its failure modes, the

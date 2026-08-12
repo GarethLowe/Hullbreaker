@@ -36,8 +36,8 @@ laid on the solution fire", not "fix gunnery bug".
 
 ## Verify before claiming
 
-`npm test` is the headless suite (`test/selfcheck.js`) — no framework, about a
-second. It drives the real `Systems`, `Crew` and `Ballistics` with no renderer.
+`npm test` is the headless suite (`test/selfcheck.js`) — no framework, several
+seconds. It drives the real `Systems`, `Crew` and `Ballistics` with no renderer.
 It must pass before a commit, and probabilistic assertions should be run a few
 times, not once.
 

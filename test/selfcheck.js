@@ -5,7 +5,7 @@
 // Systems and Crew classes with no renderer attached and asserts the behaviours
 // that would be expensive to notice by flying around. If a change breaks the
 // network solver, the shield model, decompression or the crew's pathing, this
-// says so in under a second.
+// says so in several seconds.
 // -----------------------------------------------------------------------------
 import { HULLS, ENGAGEMENT_RANGE, NETS } from '../src/ship/hulls.js';
 import { Systems, ATMO_CRITICAL, TRIP_TEMP_C, FUEL_LEAK_RATE } from '../src/ship/systems.js';
