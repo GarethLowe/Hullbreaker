@@ -191,8 +191,6 @@ export class Ballistics {
       // rather than guns. An active seeker has its own head and no idea what a
       // subsystem is.
       subsystem: !active && ship.isPlayer ? this.game.targeting.subsystem : null,
-      /** Which channel of the head is holding this lock; see `_acquire`. */
-      band: null,
       /** Countdown to the next sweep of the seeker head. */
       scanT: 0,
       fuse: weapon.fuse,
@@ -236,7 +234,6 @@ export class Ballistics {
     const cosFov = Math.cos(s.fov);
     let best = null;
     let bestScore = 0;
-    let bestBand = null;
     for (const ship of this.game.ships) {
       if (ship.disposed || ship === m.owner) {
         continue;
@@ -263,10 +260,8 @@ export class Ballistics {
       if (score > bestScore) {
         bestScore = score;
         best = ship;
-        bestBand = ir >= optical ? 'IR' : 'OPT';
       }
     }
-    m.band = best ? bestBand : null;
     return best;
   }
 

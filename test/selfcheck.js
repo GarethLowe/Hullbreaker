@@ -2902,13 +2902,11 @@ ok('bow-gun hulls hold a zero fight aspect',
     game.ships = [cold, hot];
     const m = {
       pos: new Vector3(), vel: new Vector3(0, 0, 400),
-      weapon: WEAPONS.seeker, owner: { faction: 'a' }, band: null,
+      weapon: WEAPONS.seeker, owner: { faction: 'a' },
     };
-    ok('an infrared head takes the hot picket over the cold dreadnought',
-      ball._acquire(m) === hot && m.band === 'IR');
+    ok('an infrared head takes the hot picket over the cold dreadnought', ball._acquire(m) === hot);
     hot.heatSignature = () => 5;          // engines cut
-    ok('...and once it goes cold, the optical channel takes the big one',
-      ball._acquire(m) === cold && m.band === 'OPT');
+    ok('...and once it goes cold, the optical channel takes the big one', ball._acquire(m) === cold);
     // And never the fleet it was launched by.
     cold.faction = 'a';
     hot.faction = 'a';
