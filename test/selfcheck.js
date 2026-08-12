@@ -1443,6 +1443,15 @@ ok('bow-gun hulls hold a zero fight aspect',
     `${(sys.shieldFraction() * 100).toFixed(0)}%`);
   ok('the rated read-out can', sys.shieldRated() < 0.85,
     `${(sys.shieldRated() * 100).toFixed(0)}%`);
+
+  for (const m of sys.modules.values()) {
+    if (m.kind === 'shieldGen') {
+      sys.damageModule(m.id, 1e12);
+    }
+  }
+  run(sys, 1);
+  ok('a shield with no live projectors reports empty',
+    sys.shieldFraction() === 0 && sys.shieldRated() === 0);
 }
 
 // --- cooling is not a shield buff -------------------------------------------

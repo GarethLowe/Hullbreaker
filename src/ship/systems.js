@@ -2032,6 +2032,9 @@ export class Systems {
   }
 
   shieldFraction() {
+    if (!this.shield.up) {
+      return 0;
+    }
     let charge = 0;
     let max = 0;
     for (const f of Object.values(this.shield.facets)) {
@@ -2052,6 +2055,9 @@ export class Systems {
    * whether to keep taking hits on this side needs the honest denominator.
    */
   shieldRated() {
+    if (!this.shield.up) {
+      return 0;
+    }
     const cap = this.hull.shield.capacity;
     if (!(cap > 0)) {
       return 0;
