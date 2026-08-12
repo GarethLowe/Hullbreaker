@@ -297,10 +297,8 @@ const REF_BULK = 1.0e7;
 
 /**
  * Waste heat a projector takes per watt its facets dissipate. Chosen so full
- * dissipation lands near the projectors' authored `heat` on every hull in the
- * roster (SABRE 8.3e-5, MERIDIAN 5.5e-5, BASTION 4.3e-5 to hit design duty
- * exactly), which keeps "shields are bought from the radiators" a real cost
- * without making a working shield self-destructive.
+ * dissipation is a roster-wide compromise: a working shield heats its
+ * projectors materially without making them self-destructive.
  */
 const SHED_HEAT_PER_WATT = 5.0e-5;
 
