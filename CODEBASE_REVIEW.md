@@ -10,7 +10,7 @@ This began as a read-only review. The implementation pass is tracked below; reco
 
 ## Implementation progress
 
-Last updated: 2026-08-12  
+Last updated: 2026-08-12
 Implementation commit: f22d1e7
 
 ### Completed
