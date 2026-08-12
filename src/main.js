@@ -70,6 +70,23 @@ export class Game {
     document.getElementById(this.started ? 'pauseStatus' : 'startStatus').textContent = message;
   }
 
+  _showOverlay(id, focusId) {
+    document.getElementById(id).classList.remove('hidden');
+    for (const elementId of ['view', 'hudCanvas', 'ui']) {
+      document.getElementById(elementId).inert = true;
+    }
+    document.getElementById(focusId).focus();
+  }
+
+  _hideOverlays() {
+    for (const id of ['splash', 'pause', 'gameover']) {
+      document.getElementById(id).classList.add('hidden');
+    }
+    for (const elementId of ['view', 'hudCanvas', 'ui']) {
+      document.getElementById(elementId).inert = false;
+    }
+  }
+
   constructor() {
     this.canvas = document.getElementById('view');
     this.renderer = new THREE.WebGLRenderer({
@@ -151,6 +168,9 @@ export class Game {
     };
     document.getElementById('splashStart').addEventListener('click', requestStart);
     document.getElementById('pauseStart').addEventListener('click', requestStart);
+    document.getElementById('gameoverRetry').addEventListener('click', () => this._retryFromGameOver());
+    document.getElementById('gameoverNew').addEventListener('click', () => this.newRun());
+    this._showOverlay('splash', 'splashStart');
     this.input.onLockError = () => {
       this._setLockStatus('POINTER LOCK WAS NOT GRANTED — CLICK TO TRY AGAIN');
     };
@@ -162,18 +182,16 @@ export class Game {
           this.resuming = false;
           this.over = false;
           this.waveTimer = 45;
-          document.getElementById('gameover').classList.add('hidden');
         }
         if (!this.started) {
           this.started = true;
-          document.getElementById('splash').classList.add('hidden');
         }
         this.paused = false;
-        document.getElementById('pause').classList.add('hidden');
+        this._hideOverlays();
       } else if (this.started && !this.over) {
         this.staticRendered = false;
         this.paused = true;
-        document.getElementById('pause').classList.remove('hidden');
+        this._showOverlay('pause', 'pauseStart');
       }
     };
 
@@ -601,7 +619,7 @@ export class Game {
       document.getElementById('gameoverRetry').textContent = this.waveStart
         ? `[R]  RETRY WAVE ${this.wave}`
         : '[R]  RETRY  —  no snapshot, starts a new run';
-      document.getElementById('gameover').classList.remove('hidden');
+      this._showOverlay('gameover', 'gameoverRetry');
       this.input.exitLock();
     }
 
@@ -882,15 +900,11 @@ export class Game {
    * into a second overlay.
    */
   _onOverKey(e) {
-    if (!this.over) {
+    if (!this.over || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
       return;
     }
     if (e.code === 'KeyR') {
-      if (this.waveStart) {
-        this.retryWave();
-      } else {
-        this.newRun();
-      }
+      this._retryFromGameOver();
     } else if (e.code === 'KeyN') {
       this.newRun();
     }
@@ -973,6 +987,14 @@ export class Game {
     this.diagnostics.resize();
     this.targetPanel.resize();
     this.targeting.resize();
+  }
+
+  _retryFromGameOver() {
+    if (this.waveStart) {
+      this.retryWave();
+    } else {
+      this.newRun();
+    }
   }
 
   _setReducedMotion(event) {

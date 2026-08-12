@@ -376,6 +376,13 @@ ok('bow-gun hulls hold a zero fight aspect',
 }
 
 {
+  let retries = 0;
+  Game.prototype._onOverKey.call({ over: true, _retryFromGameOver() { retries++; } },
+    { code: 'KeyR', ctrlKey: true, altKey: false, metaKey: false, shiftKey: false });
+  ok('game-over hotkeys leave modified browser shortcuts alone', retries === 0);
+}
+
+{
   const donorParty = { size: 10, max: 10, at: 'donor' };
   const needParty = { size: 5.9, max: 6, at: 'need' };
   const donor = { max: 10, role: 'gunner', suited: false, parties: [donorParty] };
