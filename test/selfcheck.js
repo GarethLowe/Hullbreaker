@@ -360,6 +360,16 @@ ok('bow-gun hulls hold a zero fight aspect',
 }
 
 {
+  const savedWindow = globalThis.window;
+  globalThis.window = { innerWidth: 1, innerHeight: 1 };
+  const game = { staticRendered: true, camera: { updateProjectionMatrix() {} }, renderer: { setSize() {} },
+    hud: { resize() {} }, diagnostics: { resize() {} }, targetPanel: { resize() {} }, targeting: { resize() {} } };
+  Game.prototype._onResize.call(game);
+  globalThis.window = savedWindow;
+  ok('resizing invalidates a paused static render', !game.staticRendered);
+}
+
+{
   const donorParty = { size: 10, max: 10, at: 'donor' };
   const needParty = { size: 5.9, max: 6, at: 'need' };
   const donor = { max: 10, role: 'gunner', suited: false, parties: [donorParty] };
