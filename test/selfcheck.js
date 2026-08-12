@@ -133,6 +133,16 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
   const sys = new Systems(HULLS.sabre, { game: { random } });
   ok('simulation subsystems accept and consume an injected RNG stream', calls > 0 && sys.ship.game.random === random);
 }
+{
+  const ball = Object.create(Ballistics.prototype);
+  ball.game = { random: () => 0.5 };
+  ball.bolts = [];
+  const weapon = { spread: 0, muzzleVel: 1, energy: 1, mass: 1, ap: 1, dwell: 1, tracer: 0 };
+  for (let i = 0; i < 901; i++) {
+    ball.spawnBolt(null, new Vector3(), new Vector3(0, 0, 1), new Vector3(), weapon, null);
+  }
+  ok('bolt simulation stays bounded by the tracer budget', ball.bolts.length === 900);
+}
 
 {
   const ready = { held: true, live: true, bears: true, cooling: false, charged: true };

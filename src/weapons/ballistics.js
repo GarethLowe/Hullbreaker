@@ -20,6 +20,8 @@ import { MATERIALS } from '../ship/hulls.js';
 import { clamp01, rand, randomDirection, coneDirection } from '../core/mathx.js';
 
 const MAX_TRACERS = 900;
+// The visual buffer is the useful ceiling: older shots are already unrenderable.
+const MAX_BOLTS = MAX_TRACERS;
 /**
  * How close a round has to pass a warhead to kill it, metres, when the warhead
  * does not say otherwise.
@@ -144,6 +146,9 @@ export class Ballistics {
    * ammunition types — it just reads the numbers the round arrived with.
    */
   spawnBolt(ship, origin, dir, inherit, weapon, ammo) {
+    if (this.bolts.length >= MAX_BOLTS) {
+      this.bolts.shift();
+    }
     coneDirection(dir, weapon.spread || 0, _d, this.game.random || Math.random);
     const vel = _d.clone().multiplyScalar(weapon.muzzleVel).add(inherit);
     this.bolts.push({
