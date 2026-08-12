@@ -355,6 +355,7 @@ export class Game {
   newRun() {
     const bindings = this._clearWorld();
     this.kills = 0;
+    this.simTime = 0;
     this._deployPlayer(null, bindings);
     this._resumePlaying();
     this.startWave(1);

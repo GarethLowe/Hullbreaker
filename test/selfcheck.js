@@ -126,6 +126,15 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
 }
 
 {
+  const game = {
+    simTime: 42, kills: 7, _clearWorld() { return null; }, _deployPlayer() {},
+    _resumePlaying() {}, startWave() {},
+  };
+  Game.prototype.newRun.call(game);
+  ok('a new run resets simulation time with its score', game.simTime === 0 && game.kills === 0);
+}
+
+{
   let resized = 0;
   const panel = { ship: null, root: { classList: { toggle() {} } }, visible: true, resize() { resized++; } };
   Diagnostics.prototype.setShip.call(panel, {});
