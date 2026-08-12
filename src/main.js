@@ -974,6 +974,10 @@ export class Game {
     this.targetPanel.resize();
     this.targeting.resize();
   }
+
+  _setReducedMotion(event) {
+    this.reducedMotion = event.matches;
+  }
 }
 
 if (typeof window !== 'undefined') {
@@ -986,7 +990,4 @@ if (typeof window !== 'undefined') {
     Game.showFatal();
   }
 
-  _setReducedMotion(event) {
-    this.reducedMotion = event.matches;
-  }
 }
