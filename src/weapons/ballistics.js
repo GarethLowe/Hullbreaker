@@ -40,6 +40,12 @@ const MAX_TRACERS = 900;
  * finished on a hundred per cent plate.
  */
 const INTERCEPT_RADIUS = 5;
+
+export function beamDamageBudget(joules, breached) {
+  return breached
+    ? { section: joules * 0.35, heat: joules * 0.30, module: joules * 0.35 }
+    : { section: joules * 0.55, heat: joules * 0.45, module: 0 };
+}
 /** Obliquity floor — a perfectly grazing hit would otherwise cost infinity. */
 const MIN_COS = 0.16;
 /** Below this cosine (~70 deg off normal) a non-penetrating slug deflects. */
@@ -993,8 +999,10 @@ export class Ballistics {
         // coolant loop, which cooked a cruiser's reactor to detonation in
         // twenty-two seconds from a bow hit. The cascade is the right mechanism
         // — it just should not be free.
-        target.sys.damageSection(first.section, joules * bite * 0.55, _p, dir);
-        target.sys.injectHeat(first.section, joules * bite * 0.45);
+        const sec = target.sys.section(first.section);
+        const budget = beamDamageBudget(joules * bite, !!sec?.breached);
+        target.sys.damageSection(first.section, budget.section, _p, dir);
+        target.sys.injectHeat(first.section, budget.heat);
         target.scorch(first.section, 0.5 * dt);
         // A beam is continuous, so it cannot lay a mark per frame without
         // flushing the whole sheet in a second. It leaves one every 0.2 s
@@ -1013,11 +1021,10 @@ export class Ballistics {
           });
         }
         // Once the plate is open the spot starts cooking what is under it.
-        const sec = target.sys.section(first.section);
         if (sec && sec.breached) {
           const inner = hits.find((h) => h.kind === 'module' && h.ship === target);
           if (inner) {
-            target.sys.damageModule(inner.module.id, joules * bite * 1.3, _p, dir);
+            target.sys.damageModule(inner.module.id, budget.module, _p, dir);
           }
         }
       }

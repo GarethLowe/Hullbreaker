@@ -12,7 +12,7 @@ import { Systems, ATMO_CRITICAL, TRIP_TEMP_C, FUEL_LEAK_RATE } from '../src/ship
 import { Crew } from '../src/ship/crew.js';
 import { Body, Autopilot, BURN_RATE, resolveCollision } from '../src/ship/flight.js';
 import { WEAPONS, AMMO, MOUNTS } from '../src/weapons/defs.js';
-import { Ballistics } from '../src/weapons/ballistics.js';
+import { Ballistics, beamDamageBudget } from '../src/weapons/ballistics.js';
 import { Ship, MOUNT_DEPRESSION } from '../src/ship/ship.js';
 import { Pilot } from '../src/ship/ai.js';
 import { Scheduler } from '../src/core/ecs.js';
@@ -89,6 +89,12 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
 
 near('a discrete shot deposits the same heat at any simulation step',
   shotHeatRate(320, 1.5, 1 / 60) * (1 / 60), shotHeatRate(320, 1.5, 1 / 30) * (1 / 30), 1e-9);
+
+{
+  const budget = beamDamageBudget(100, true);
+  near('a breached beam budget spends no more than its delivered energy',
+    budget.section + budget.heat + budget.module, 100, 1e-9);
+}
 
 {
   const def = { id: 'test', label: 'TEST', volume: 100, plateHp: 1, frameHp: 1 };
