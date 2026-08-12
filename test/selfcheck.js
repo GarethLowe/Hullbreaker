@@ -20,6 +20,7 @@ import { Diagnostics } from '../src/ui/diagnostics.js';
 import { FX } from '../src/fx/fx.js';
 import { Scheduler } from '../src/core/ecs.js';
 import { AudioEngine } from '../src/core/audio.js';
+import { Input } from '../src/core/input.js';
 import { canFireMount, shotHeatRate } from '../src/ship/gunnery.js';
 import { createLiveSection, sectionHeatDelta } from '../src/ship/hull-types.js';
 import { seededRandom, seedFromSearch } from '../src/core/rng.js';
@@ -391,6 +392,24 @@ ok('bow-gun hulls hold a zero fight aspect',
   audio._releaseOnEnded(source, { disconnect() { disconnected++; } });
   source.onended();
   ok('an ended audio source frees its voice slot immediately', audio.voices === 0 && disconnected === 1);
+}
+
+{
+  const target = () => ({ added: [], removed: [], addEventListener(...args) { this.added.push(args); }, removeEventListener(...args) { this.removed.push(args); } });
+  const savedWindow = globalThis.window;
+  const savedDocument = globalThis.document;
+  const fakeWindow = target();
+  const fakeDocument = Object.assign(target(), { pointerLockElement: null });
+  globalThis.window = fakeWindow;
+  globalThis.document = fakeDocument;
+  const dom = Object.assign(target(), { requestPointerLock() {} });
+  const input = new Input(dom);
+  input._onWheel({ deltaY: 1, preventDefault() { throw new Error('unlocked wheel swallowed'); } });
+  input.dispose();
+  globalThis.window = savedWindow;
+  globalThis.document = savedDocument;
+  ok('input disposal removes its global listeners and ignores unlocked wheel input',
+    input.mouse.wheel === 0 && fakeWindow.removed.length === 7 && fakeDocument.removed.length === 3);
 }
 
 {

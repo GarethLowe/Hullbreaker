@@ -61,10 +61,11 @@ export class Input {
       }
     };
     this._onWheel = (e) => {
-      this.mouse.wheel += Math.sign(e.deltaY);
-      if (this.locked) {
-        e.preventDefault();
+      if (!this.locked) {
+        return;
       }
+      this.mouse.wheel += Math.sign(e.deltaY);
+      e.preventDefault();
     };
     this._onLockChange = () => {
       this.locked = document.pointerLockElement === this.dom;
@@ -101,11 +102,12 @@ export class Input {
     document.addEventListener('pointerlockchange', this._onLockChange);
     document.addEventListener('pointerlockerror', this._onLockError);
     window.addEventListener('blur', this._reset);
-    document.addEventListener('visibilitychange', () => {
+    this._onVisibilityChange = () => {
       if (document.hidden) {
         this._reset();
       }
-    });
+    };
+    document.addEventListener('visibilitychange', this._onVisibilityChange);
     domElement.addEventListener('contextmenu', this._onContext);
   }
 
@@ -136,6 +138,21 @@ export class Input {
     if (this.locked) {
       document.exitPointerLock();
     }
+  }
+
+  dispose() {
+    this.exitLock();
+    window.removeEventListener('keydown', this._onKeyDown);
+    window.removeEventListener('keyup', this._onKeyUp);
+    window.removeEventListener('mousemove', this._onMouseMove);
+    window.removeEventListener('mousedown', this._onMouseDown);
+    window.removeEventListener('mouseup', this._onMouseUp);
+    window.removeEventListener('wheel', this._onWheel);
+    window.removeEventListener('blur', this._reset);
+    document.removeEventListener('pointerlockchange', this._onLockChange);
+    document.removeEventListener('pointerlockerror', this._onLockError);
+    document.removeEventListener('visibilitychange', this._onVisibilityChange);
+    this.dom.removeEventListener('contextmenu', this._onContext);
   }
 
   down(code) {
