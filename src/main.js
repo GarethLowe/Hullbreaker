@@ -894,7 +894,7 @@ export class Game {
         this.simTime += dt;
         this.scheduler.run({ dt, game: this });
       }
-      if (steps === MAX_STEPS) {
+      if (steps === MAX_STEPS && this.accumulator >= STEP_INTERVAL) {
         this.accumulator = 0;
       }
     }
