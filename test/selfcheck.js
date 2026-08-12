@@ -296,6 +296,20 @@ ok('bow-gun hulls hold a zero fight aspect',
   ok('fixed-gun fire gating follows a bearing mount, not hull attitude', pilot._fixedGunsBear());
 }
 
+{
+  const pilot = Object.create(Pilot.prototype);
+  pilot.target = { position: new Vector3(0, 0, 100) };
+  pilot.ship = { position: new Vector3() };
+  pilot.breakDir = new Vector3(1, 0, 0);
+  pilot.lastSeenAge = 2;
+  pilot.triggers = [];
+  pilot._steer = () => 1;
+  pilot._turretsBear = () => true;
+  const cmd = { throttle: 0 };
+  pilot._break(1 / 60, cmd);
+  ok('a breaking pilot does not fire on a stale contact', !pilot.triggers[1]);
+}
+
 // --- physics and thermal invariants ----------------------------------------
 {
   const sys = fresh();

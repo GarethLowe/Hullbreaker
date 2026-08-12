@@ -507,7 +507,7 @@ export class Pilot {
     cmd.strafeX = 0;
     cmd.strafeY = 0;
     this.triggers[0] = false;
-    this.triggers[1] = dist < WEAPONS_FREE && this._turretsBear();
+    this.triggers[1] = this.lastSeenAge < 1.2 && dist < WEAPONS_FREE && this._turretsBear();
   }
 
   /**
@@ -588,7 +588,8 @@ export class Pilot {
     cmd.strafeX = this.breakDir.x * 0.6;
     cmd.strafeY = this.breakDir.y * 0.6;
     this.triggers[0] = false;
-    this.triggers[1] = this._turretsBear();
+    const dist = this.target ? this.target.position.distanceTo(this.ship.position) : Infinity;
+    this.triggers[1] = this.lastSeenAge < 1.2 && dist < WEAPONS_FREE && this._turretsBear();
   }
 
   /**
