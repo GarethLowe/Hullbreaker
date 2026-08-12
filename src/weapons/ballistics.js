@@ -962,7 +962,9 @@ export class Ballistics {
   /**
    * Beam tick. Finds the first surface along the aim line and pours energy into
    * it for this frame: shields first, then plate, then heat into the
-   * compartment behind it and damage to whatever is under the spot.
+   * compartment behind it and damage to whatever is under the spot. Beams
+   * intentionally do not engage ordnance; automatic repeaters are the
+   * point-defence weapon and preserve a distinct counterplay role.
    */
   fireBeam(ship, mount, origin, dir, dt) {
     const game = this.game;
