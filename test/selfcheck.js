@@ -124,6 +124,17 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
 }
 
 {
+  let calls = 0;
+  const random = () => { calls++; return 0.5; };
+  const ball = new Ballistics({ scene: { add() {} }, random });
+  ball.spawnBolt({}, new Vector3(), new Vector3(0, 0, 1), new Vector3(), {
+    spread: 0.1, muzzleVel: 1, energy: 1, mass: 1, ap: 1, dwell: 1, tracer: 0,
+  }, null);
+  const sys = new Systems(HULLS.sabre, { game: { random } });
+  ok('simulation subsystems accept and consume an injected RNG stream', calls > 0 && sys.ship.game.random === random);
+}
+
+{
   const ready = { held: true, live: true, bears: true, cooling: false, charged: true };
   ok('a gunnery gate accepts a ready mount', canFireMount(ready));
   for (const key of Object.keys(ready)) {
