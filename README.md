@@ -47,18 +47,6 @@ That is the whole loop. Other entry points:
 | `npm run play` | production build, then serve it on :4174 and open a browser |
 | `npm run build` | production bundle into `dist/` |
 | `npm test` | headless assertions over the simulation (see below) |
-| `npm run serve:nobuild` | static-serve the source on loopback with **no build at all** |
-
-**No-build path.** `index.html` carries a CDN import map for Three.js. After
-installing dependencies, the source folder can be served without a build:
-
-```bash
-npm run serve:nobuild
-```
-
-It has to be over HTTP either way — browsers refuse ES module imports from
-`file://`. Under Vite the import map is inert, and `vite build` strips it.
-
 **Build output.** The app and Three.js are separate cacheable chunks. There is
 no physics library. Everything else — textures, materials, sound — is generated
 at runtime, so there are no binary assets in the repository.
