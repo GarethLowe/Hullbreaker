@@ -74,8 +74,8 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
 {
   const scheduler = new Scheduler();
   const order = [];
-  scheduler.addSystem('late', () => order.push('late'), 20);
-  scheduler.addSystem('early', () => order.push('early'), 10);
+  scheduler.addSystem(() => order.push('late'), 20);
+  scheduler.addSystem(() => order.push('early'), 10);
   scheduler.run({});
   ok('the scheduler runs systems in declared order', order.join(',') === 'early,late');
 }

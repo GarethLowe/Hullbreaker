@@ -386,13 +386,13 @@ export class Game {
   _registerSystems() {
     const scheduler = this.scheduler;
 
-    scheduler.addSystem('intent', ({ dt }) => {
+    scheduler.addSystem(({ dt }) => {
       if (this.player && !this.player.ship.disposed) {
         this.player.update(dt);
       }
     }, 10);
 
-    scheduler.addSystem('brains', ({ dt }) => {
+    scheduler.addSystem(({ dt }) => {
       for (const [ship, pilot] of this.pilots) {
         if (!ship.disposed && !ship.dead) {
           pilot.update(dt);
@@ -409,13 +409,13 @@ export class Game {
       }
     }, 20);
 
-    scheduler.addSystem('ships', ({ dt }) => {
+    scheduler.addSystem(({ dt }) => {
       for (const s of this.ships) {
         s.update(dt);
       }
     }, 30);
 
-    scheduler.addSystem('collide', () => {
+    scheduler.addSystem(() => {
       // Ships are few; the pair loop is honest and never the bottleneck.
       for (let i = 0; i < this.ships.length; i++) {
         for (let j = i + 1; j < this.ships.length; j++) {
@@ -442,26 +442,26 @@ export class Game {
       }
     }, 40);
 
-    scheduler.addSystem('ballistics', ({ dt }) => {
+    scheduler.addSystem(({ dt }) => {
       this.ballistics.update(dt);
     }, 50);
 
-    scheduler.addSystem('fx', ({ dt }) => {
+    scheduler.addSystem(({ dt }) => {
       this.fx.update(dt);
     }, 60);
 
-    scheduler.addSystem('targeting', ({ dt }) => {
+    scheduler.addSystem(({ dt }) => {
       this.targeting.update(dt);
       this.hud.update(dt);
     }, 70);
 
-    scheduler.addSystem('director', ({ dt }) => {
+    scheduler.addSystem(({ dt }) => {
       this._director(dt);
     }, 80);
 
     // Last in the step, so a sample is the settled state of the tick rather
     // than a half-updated one. Costs nothing until `game.trace.start()`.
-    scheduler.addSystem('trace', ({ dt }) => {
+    scheduler.addSystem(({ dt }) => {
       this.trace.tick(dt);
     }, 90);
   }

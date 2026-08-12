@@ -13,16 +13,13 @@ export class Scheduler {
 
   // -- systems ---------------------------------------------------------------
 
-  addSystem(name, fn, order = 0) {
-    this.systems.push({ name, fn, order, enabled: true, ms: 0 });
+  addSystem(fn, order = 0) {
+    this.systems.push({ fn, order });
     this.systems.sort((a, b) => a.order - b.order);
   }
 
   run(ctx) {
     for (const sys of this.systems) {
-      if (!sys.enabled) {
-        continue;
-      }
       sys.fn(ctx);
     }
   }
