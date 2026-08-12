@@ -1161,6 +1161,14 @@ export class FX {
     for (const p of this.smokes) {
       p.life = 0;
     }
+    this.pSize.fill(0);
+    this.pCol.fill(0);
+    this.kSize.fill(0);
+    this.kAlpha.fill(0);
+    this.pGeo.attributes.color.needsUpdate = true;
+    this.pGeo.attributes.psize.needsUpdate = true;
+    this.kGeo.attributes.psize.needsUpdate = true;
+    this.kGeo.attributes.aAlpha.needsUpdate = true;
     for (const s of this.streaks) {
       s.life = 0;
     }

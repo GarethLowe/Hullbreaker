@@ -17,6 +17,7 @@ import { Ship, MOUNT_DEPRESSION } from '../src/ship/ship.js';
 import { Pilot } from '../src/ship/ai.js';
 import { Game } from '../src/main.js';
 import { Diagnostics } from '../src/ui/diagnostics.js';
+import { FX } from '../src/fx/fx.js';
 import { Scheduler } from '../src/core/ecs.js';
 import { canFireMount, shotHeatRate } from '../src/ship/gunnery.js';
 import { createLiveSection, sectionHeatDelta } from '../src/ship/hull-types.js';
@@ -90,6 +91,15 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
   const panel = { ship: null, root: { classList: { toggle() {} } }, visible: true, resize() { resized++; } };
   Diagnostics.prototype.setShip.call(panel, {});
   ok('showing a target panel resizes its cutaway canvas', resized === 1);
+}
+
+{
+  const fx = new FX({ scene: { add() {} }, assets: { glow: null, softGlow: null, environment: null } });
+  fx.pSize[0] = fx.kSize[0] = fx.kAlpha[0] = 1;
+  fx.pCol[0] = 1;
+  fx.clear();
+  ok('clearing effects erases stale particle and smoke GPU attributes',
+    fx.pSize[0] === 0 && fx.pCol[0] === 0 && fx.kSize[0] === 0 && fx.kAlpha[0] === 0);
 }
 
 {
