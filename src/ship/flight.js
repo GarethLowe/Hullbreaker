@@ -297,7 +297,7 @@ export class Autopilot {
     //   +omega.y swings the nose toward port      -> yaw LEFT
     //   +omega.z lifts the port side              -> roll LEFT
     // The command is in pilot intent (+pitch nose up, +yaw right, +roll
-    // starboard-down), so all three invert.
+    // starboard-down): pitch and yaw invert; roll already matches.
     const wantRate = [
       -cmd.pitch * f.pitchRate * this._auth[0],
       -cmd.yaw * f.yawRate * this._auth[1],
