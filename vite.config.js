@@ -16,8 +16,7 @@ import { defineConfig } from 'vite';
  */
 const CSP = "default-src 'self'; base-uri 'none'; object-src 'none'; "
   + "script-src 'self'; style-src 'self' 'unsafe-inline'; "
-  + "img-src 'self' data: blob:; media-src 'self'; connect-src 'self'; "
-  + "worker-src 'self' blob:";
+  + "img-src 'self' data: blob:; media-src 'self'; connect-src 'self'";
 
 function productionIndexHtml() {
   return {

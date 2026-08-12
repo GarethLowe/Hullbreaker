@@ -21,6 +21,7 @@ import { FX } from '../src/fx/fx.js';
 import { Scheduler } from '../src/core/ecs.js';
 import { AudioEngine } from '../src/core/audio.js';
 import { Input } from '../src/core/input.js';
+import { Trace } from '../src/core/trace.js';
 import { canFireMount, shotHeatRate } from '../src/ship/gunnery.js';
 import { createLiveSection, sectionHeatDelta } from '../src/ship/hull-types.js';
 import { seededRandom, seedFromSearch } from '../src/core/rng.js';
@@ -36,6 +37,7 @@ import {
 
 let passed = 0;
 const failures = [];
+const EXPECTED_ASSERTIONS = 944;
 
 // Keep probabilistic checks reproducible. Set SELFCHECK_SEED to replay a
 // different run; the effective seed is printed with the result.
@@ -245,7 +247,19 @@ near('a discrete shot deposits the same heat at any simulation step',
 {
   const a = seededRandom(1729);
   const b = seededRandom(1729);
-  ok('a simulation RNG replays its seed', [a(), a(), a()].join(',') === [b(), b(), b()].join(','));
+  const left = [a(), a(), a()];
+  ok('a simulation RNG replays its seed', left.join(',') === [b(), b(), b()].join(',')
+    && new Set(left).size > 1);
+}
+
+{
+  const sys = fresh();
+  const ship = { disposed: false, sys, body: { vel: new Vector3() },
+    crew: { headcount: 1 }, mounts: [] };
+  const trace = new Trace({ player: { ship }, ships: [ship], wave: 1 });
+  trace.start();
+  trace.tick(0.1);
+  ok('the flight recorder captures a live simulation sample', trace.samples.length === 1);
 }
 
 ok('a URL seed is accepted for simulation replay', seedFromSearch('?seed=1729') === 1729);
@@ -1361,8 +1375,9 @@ ok('bow-gun hulls hold a zero fight aspect',
   ship.hull = HULLS.meridian;
   ship.body = { quat: new Quaternion().setFromEuler(new Euler(0.3, -1.1, 0.7)), pos: new Vector3(120, -40, 900) };
   const back = new Vector3();
-  for (const id of ['reactor', 'thruster_A', 'mag_fwd', 'bridge_comp', 'sensor']) {
+  for (const id of ['reactor', 'thruster_A', 'mag_fwd', 'computer', 'sensor']) {
     if (!ship.hull.moduleById[id]) {
+      ok(`MERIDIAN contains ${id} for module-point coverage`, false);
       continue;
     }
     const def = ship.hull.moduleById[id];
@@ -3471,6 +3486,9 @@ ok('bow-gun hulls hold a zero fight aspect',
 }
 
 // --- report -----------------------------------------------------------------
+if (passed !== EXPECTED_ASSERTIONS) {
+  failures.push(`assertion count ${passed}, expected ${EXPECTED_ASSERTIONS}`);
+}
 if (failures.length === 0) {
   console.log(`selfcheck: ${passed} assertions passed (seed ${SELF_CHECK_SEED})`);
 } else {
