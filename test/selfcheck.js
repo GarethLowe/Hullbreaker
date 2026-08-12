@@ -299,7 +299,7 @@ ok('bow-gun hulls hold a zero fight aspect',
 {
   const a = new Body(HULLS.sabre);
   const b = new Body(HULLS.sabre);
-  b.pos.set(a.radius + b.radius - 1, 0, 0);
+  b.pos.set(a.contactRadii.x + b.contactRadii.x - 1, 0, 0);
   a.vel.set(10, 0, 0);
   b.vel.set(-10, 0, 0);
   const initialMomentum = a.mass * a.vel.x + b.mass * b.vel.x;
@@ -315,10 +315,17 @@ ok('bow-gun hulls hold a zero fight aspect',
 {
   const light = new Body(HULLS.sabre);
   const heavy = new Body(HULLS.bastion);
-  const heavyStart = heavy.pos.x = light.radius + heavy.radius - 10;
+  const heavyStart = heavy.pos.x = light.contactRadii.x + heavy.contactRadii.x - 10;
   resolveCollision(light, heavy);
   ok('collision de-penetration moves the lighter hull farther',
     Math.abs(light.pos.x) > Math.abs(heavy.pos.x - heavyStart) * 20);
+}
+{
+  const a = new Body(HULLS.sabre);
+  const b = new Body(HULLS.sabre);
+  b.pos.x = a.radius + b.radius - 1;
+  ok('collision uses the shield ellipsoid rather than the hull bounding sphere',
+    resolveCollision(a, b) === null);
 }
 {
   const a = new Body(HULLS.sabre);

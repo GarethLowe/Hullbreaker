@@ -84,6 +84,7 @@ export class Body {
     this.force = new THREE.Vector3();
     this.torque = new THREE.Vector3();     // body frame
     this.radius = hull.radius;
+    this.contactRadii = new THREE.Vector3(...hull.shield.radii);
     /** Centre of mass offset in body coordinates, from the hull tables. */
     this.com = new THREE.Vector3(...hull.com);
   }
@@ -462,15 +463,21 @@ export function resolveCollision(a, b, restitution = 0.25) {
 
   n.copy(b.pos).sub(a.pos);
   let dist = n.length();
-  const minDist = a.radius + b.radius;
-  if (dist >= minDist) {
-    return null;
-  }
+  const support = (body, normal) => {
+    _q.copy(body.quat).invert();
+    _v.copy(normal).applyQuaternion(_q);
+    const r = body.contactRadii || _v.set(body.radius, body.radius, body.radius);
+    return Math.hypot(r.x * _v.x, r.y * _v.y, r.z * _v.z);
+  };
   if (dist < 1e-4) {
     n.set(1, 0, 0);
     dist = 0;
   } else {
     n.multiplyScalar(1 / dist);        // contact normal, a -> b
+  }
+  const minDist = support(a, n) + support(b, n);
+  if (dist >= minDist) {
+    return null;
   }
   rel.copy(b.vel).sub(a.vel);
   const closing = rel.dot(n);
