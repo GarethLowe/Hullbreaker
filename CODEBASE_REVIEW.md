@@ -6,7 +6,35 @@ Date: 2026-08-12
 
 This review covered the runtime architecture, ship and weapon simulation, physics, lifecycle management, browser input and UI, tests, build tooling, dependency posture, and project documentation. The Ponytail review/audit workflow was deliberately excluded as requested.
 
-The review was read-only apart from creating this report. Recommendations below distinguish confirmed defects from structural or preventive improvements.
+This began as a read-only review. The implementation pass is tracked below; recommendations still pending are intentional follow-up work rather than unrecorded omissions.
+
+## Implementation progress
+
+Last updated: 2026-08-12  
+Implementation commit: f22d1e7
+
+### Completed
+
+- [x] R-01 through R-05: fixed thermal NaN, Euler sign, centre-of-mass impulse, collision response/energy accounting, and rejected-shot ammunition loss; added focused regressions.
+- [x] R-06 through R-09: corrected COM-relative collision bounds, seeker acquisition/FOV loss, wave teardown ordering, and simulation-time gameplay decisions.
+- [x] R-10 through R-12: added pointer-lock error handling, keyboard-accessible start/resume controls, responsive/DPR/reduced-motion improvements, and upgraded audited development dependencies.
+- [x] R-13 through R-22: made browser smoke failures fail closed, added deterministic test seeds, CI, Node requirements, loopback no-build serving, documentation updates, inactive-frame throttling, and a production startup smoke check.
+- [x] R-29: removed confirmed unused state, exports, and helpers identified in the review.
+- [x] R-30 and R-31: corrected stale operational documentation and made production source maps opt-in by removing them from the default build.
+
+### Pending — requires a separate, scoped change
+
+- [ ] R-23: make ECS or the current ordered scheduler the single lifecycle authority. The immediate wave-transition bug is fixed, but the duplicate ownership model remains.
+- [ ] R-24 and R-25: incrementally separate simulation, rendering, effects, and authored hull data; split oversized modules only alongside domain changes that establish testable seams.
+- [ ] R-26: introduce gradual JSDoc/checkJs typing at authored/live-state boundaries.
+- [ ] R-27: decide and document the power-versus-energy model before renaming fields or changing balance behavior.
+- [ ] R-28: route outcome-affecting simulation randomness through an injectable seeded RNG; the test harness is deterministic, but runtime simulation is not yet replayable.
+- [ ] R-32: add an explicit deployment CSP/self-hosted asset policy if the game is publicly hosted.
+- [ ] R-33: profile trace storage before replacing its bounded array with a circular buffer.
+
+### Deferred by evidence
+
+- [ ] Application code splitting: Vite still warns about the approximately 534 kB application chunk, but no startup performance measurement has demonstrated that splitting it would improve play. Keep this deferred until profiling identifies a noncritical boundary.
 
 ## Executive summary
 
@@ -24,11 +52,11 @@ The architectural issue behind several bugs is duplicated state ownership. The E
 
 ## Verification performed
 
-- Ran npm test three consecutive times. Each run passed all 871 assertions.
-- Ran npm run build successfully.
-- Production build sizes were approximately 23.6 kB for index HTML, 477.4 kB for the Three.js chunk, and 535.3 kB for the application chunk before compression. Vite warned that the application chunk exceeds 500 kB.
-- Started the built-in development server and ran the Playwright smoke capture. The game initialized, the MERIDIAN loaded, all 22 reported mounts were rigged, and no browser console or page errors were reported.
-- Ran npm audit. The production dependency audit was clean. The full audit reported one high-severity Vite advisory group and one moderate esbuild advisory, both in development dependencies.
+- Ran npm test after implementation. It passed all 883 deterministic assertions using seed 1729.
+- Ran npm run build successfully with Vite 8.2.1.
+- Current production build sizes are approximately 24.1 kB for index HTML, 485.9 kB for the Three.js chunk, and 534.1 kB for the application chunk before compression. Vite still warns that the application chunk exceeds 500 kB.
+- Ran the Playwright smoke capture against the production preview. The game initialized, the MERIDIAN loaded, all 22 reported mounts were rigged, and no browser console or page errors were reported.
+- Ran npm audit --omit=dev after the dependency upgrade. It reported zero production vulnerabilities.
 - Reproduced the heat, centre-of-mass impulse, collision restitution, and collision-radius defects with focused headless checks.
 
 Passing the existing suite therefore does not imply that the core physics and thermal paths are correct; the missing assertions are listed with each finding.
