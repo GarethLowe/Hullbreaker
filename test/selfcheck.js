@@ -103,6 +103,15 @@ near('a discrete shot deposits the same heat at any simulation step',
 }
 
 {
+  const marks = [];
+  const ball = new Ballistics({ scene: { add() {} }, onHit: (owner, ship, internal) => marks.push(internal) });
+  const ctx = { owner: {} };
+  ball._announce(ctx, {}, false, false);
+  ball._announce(ctx, {}, true, true);
+  ok('a module strike supersedes its entry-wall hit marker', marks.join(',') === 'false,true');
+}
+
+{
   const def = { id: 'test', label: 'TEST', volume: 100, plateHp: 1, frameHp: 1 };
   near('section heat uses authored volume', sectionHeatDelta(def, 1e6), 360, 1e-9);
   // Regression: the extraction once hardcoded 20 while everything else in the

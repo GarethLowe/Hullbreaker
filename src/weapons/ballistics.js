@@ -951,7 +951,7 @@ export class Ballistics {
   }
 
   _announce(ctx, ship, internal, already) {
-    if (already || !ctx.owner) {
+    if (!ctx.owner || (already && !internal)) {
       return;
     }
     this.game.onHit(ctx.owner, ship, internal);
