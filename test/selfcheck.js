@@ -3267,11 +3267,13 @@ ok('bow-gun hulls hold a zero fight aspect',
     shield: { base: sys.shield.base, up: sys.shield.up },
     power: { capStore: sys.capStore, capMax: sys.capMax, brownout: sys.brownout,
       busQuality: sys.busQuality, integrity: sys.integrity },
+    reinforceT: crew.reinforceT,
   });
 
   const sys = fresh();
   const crew = new Crew(HULLS.meridian, sys);
   run(sys, 2, crew);
+  crew.reinforceT = 1.7;
 
   // Rough it up: plate off, compartments open, a fire, a spill, spent rounds,
   // drained fuel, a wrecked module, casualties, a flat capacitor.

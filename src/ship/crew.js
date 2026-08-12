@@ -210,6 +210,7 @@ export class Crew {
    */
   snapshot() {
     return {
+      reinforceT: this.reinforceT,
       parties: this.parties.map((q) => ({
         ...captureState(q),
         // The one nested object in the simulation's state, and therefore the
@@ -228,6 +229,7 @@ export class Crew {
       return;
     }
     applyList(this.parties, snap.parties);
+    this.reinforceT = snap.reinforceT || 0;
     // Copied out again rather than shared, so restoring twice cannot hand two
     // ships the same task object.
     this.parties.forEach((q, i) => {
