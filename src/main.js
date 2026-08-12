@@ -46,7 +46,6 @@ import { seededRandom, seedFromSearch } from './core/rng.js';
  */
 const STEP_INTERVAL = 1 / 60;
 const FIXED_DT = 1 / 60;
-const MIN_SIM_DT = 1 / 2000;
 const MAX_STEPS = 5;
 const TIME_SCALES = [1, 0.35, 0.12];
 
@@ -899,7 +898,7 @@ export class Game {
       }
       this.accumulator += wall;
       let steps = 0;
-      const dt = Math.max(FIXED_DT * this.timeScale, MIN_SIM_DT);
+      const dt = FIXED_DT * this.timeScale;
       while (this.accumulator >= STEP_INTERVAL && steps < MAX_STEPS && !this.over) {
         this.accumulator -= STEP_INTERVAL;
         steps++;
