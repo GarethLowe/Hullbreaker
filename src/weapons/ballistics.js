@@ -62,6 +62,8 @@ const RICOCHET_COS = 0.40;
  * energy delivered rather than off the calibre.
  */
 const markRadius = (joules) => Math.min(14, 1.1 + Math.sqrt(Math.max(joules, 0) * 1e-6) * 0.55);
+/** A penetrator loses a little effectiveness to yaw and erosion before exiting. */
+const EXIT_WALL_AP_MULT = 1.1;
 
 /**
  * How much of a blast an impact of this size should throw, 0.5 to 6.
@@ -768,7 +770,7 @@ export class Ballistics {
           return { stopped: true, energy: 0, point: _p.clone() };
         }
         const cos = Math.max(h.cos !== undefined ? h.cos : 1, MIN_COS);
-        const ap = h.kind === 'wallIn' ? ctx.ap : ctx.ap * 1.1;
+        const ap = h.kind === 'wallIn' ? ctx.ap : ctx.ap * EXIT_WALL_AP_MULT;
         const cost = ship.wallCost(h.section, cos, ap);
 
         // Contact fuse: the shell functions on the plate it touches. It never
