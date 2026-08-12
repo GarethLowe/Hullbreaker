@@ -88,15 +88,16 @@ const fresh = (id = 'meridian') => new Systems(HULLS[id]);
 
 {
   const ship = { disposed: false, dispose() { this.disposed = true; } };
+  const pilot = { target: ship };
   const game = {
-    ships: [ship], pilots: new Map(), player: { ship },
+    ships: [ship], pilots: new Map([[{}, pilot]]), player: { ship },
     targeting: { target: null, setTarget() {} },
     diagnostics: { ship, setShip(next) { this.ship = next; } },
     targetPanel: { ship: null, setShip() {} },
   };
   Game.prototype._disposeShip.call(game, ship);
   ok('disposing the player clears player and diagnostics references',
-    game.player === null && game.diagnostics.ship === null);
+    game.player === null && game.diagnostics.ship === null && pilot.target === null);
 }
 
 {

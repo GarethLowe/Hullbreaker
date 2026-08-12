@@ -208,6 +208,11 @@ export class Game {
       this.ships.splice(i, 1);
     }
     this.pilots.delete(ship);
+    for (const pilot of this.pilots.values()) {
+      if (pilot.target === ship) {
+        pilot.target = null;
+      }
+    }
     if (this.targeting.target === ship) {
       this.targeting.setTarget(null);
     }
