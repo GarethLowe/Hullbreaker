@@ -2594,6 +2594,22 @@ ok('bow-gun hulls hold a zero fight aspect',
       !ship._bears(off, far));
   }
 
+  {
+    const ship = Object.create(Ship.prototype);
+    ship.body = { quat: new Quaternion(), vel: new Vector3() };
+    ship.game = { simTime: 0 };
+    ship.sys = { hasData: () => true };
+    ship.localToWorld = (local, out) => out.copy(local);
+    const mount = {
+      weapon: { muzzleVel: 120, topSpeed: 620 }, origin: new Vector3(),
+      rest: new Vector3(0, 0, 1), up: new Vector3(0, 1, 0),
+      aim: new Vector3(0, 0, 1), want: new Vector3(), mod: { eff: 1 }, traverses: true, def: { arc: Math.PI },
+    };
+    ship._aimMount(mount, { position: new Vector3(0, 0, 1000), velocity: new Vector3(300, 0, 0) }, 10, null);
+    ok('missile mounts lead at sustained speed rather than tube speed', mount.want.x > 0.3,
+      `lead ${mount.want.x.toFixed(3)}`);
+  }
+
   // Every gun has to be able to join a fight the ship can actually have.
   //
   // The original form of this asserted every mount could traverse onto the

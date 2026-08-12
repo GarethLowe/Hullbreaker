@@ -1215,9 +1215,10 @@ export class Ship {
       // control has actually been told to put the rounds; the hull centre is
       // only the default.
       _v2.copy(aimAt || target.position).sub(_o);
-      if (w.muzzleVel) {
+      const leadSpeed = w.topSpeed || w.muzzleVel;
+      if (leadSpeed) {
         _d.copy(target.velocity).sub(this.velocity);
-        const t = interceptTime(_v2, _d, w.muzzleVel);
+        const t = interceptTime(_v2, _d, leadSpeed);
         if (t !== null && t < 6) {
           _v2.addScaledVector(_d, t);
         }
