@@ -15,7 +15,7 @@
     "play": "vite build && vite preview --open",
     "test": "node test/selfcheck.js",
     "typecheck:hull": "tsc --allowJs --checkJs --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext src/ship/hull-types.js",
-    "test:smoke": "node tools/shot.mjs .smoke.png --chrome --url http://127.0.0.1:4174/"
+    "test:smoke": "node tools/shot.mjs .smoke.png --check --chrome --url http://127.0.0.1:4174/"
   },
   "devDependencies": {
     "playwright": "^1.62.1",

@@ -24,9 +24,16 @@ function productionIndexHtml() {
     name: 'production-index-html',
     apply: 'build',
     transformIndexHtml(html) {
-      return html
-        .replace(/\s*<script type="importmap">[\s\S]*?<\/script>/, '')
-        .replace('<title>', `<meta http-equiv="Content-Security-Policy" content="${CSP}">\n<title>`);
+      const withoutImportMap = html.replace(/\s*<script type="importmap">[\s\S]*?<\/script>/, '');
+      if (withoutImportMap === html) {
+        throw new Error('production HTML is missing its import-map anchor');
+      }
+      const withCsp = withoutImportMap.replace('<title>',
+        `<meta http-equiv="Content-Security-Policy" content="${CSP}">\n<title>`);
+      if (withCsp === withoutImportMap) {
+        throw new Error('production HTML is missing its title anchor');
+      }
+      return withCsp;
     },
   };
 }

@@ -49,9 +49,9 @@ const browser = await chromium.launch({
     '--ignore-gpu-blocklist', '--no-sandbox'],
 });
 let info;
+const errors = [];
 try {
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
-const errors = [];
 page.on('console', (m) => {
   if (m.type() === 'error') {
     errors.push(m.text());
@@ -167,7 +167,9 @@ if (flag('fire')) {
   });
 }
 await page.waitForTimeout(flag('fire') ? 2600 : 2200);
-await page.screenshot({ path: out });
+if (!flag('check')) {
+  await page.screenshot({ path: out, timeout: 10000 });
+}
 if (flag('fire')) {
   await page.evaluate(() => {
     window.game.input.buttons[0] = false;

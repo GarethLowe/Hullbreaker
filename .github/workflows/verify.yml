@@ -14,8 +14,15 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm test
+      - run: npm run typecheck:hull
+      - run: |
+          for seed in 1729 7331 9001; do
+            SELFCHECK_SEED=$seed npm test
+          done
       - run: npm run build
+      - run: |
+          grep -F 'Content-Security-Policy' dist/index.html
+          ! grep -F '<script type="importmap">' dist/index.html
       - run: npx playwright install --with-deps chromium
       - run: |
           npm run preview -- --host 127.0.0.1 &
